@@ -5,6 +5,10 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[features]
+default = []
+cuda = ["ort/cuda"]
+
 [dependencies]
 # Image processing
 image.workspace = true
@@ -15,7 +19,8 @@ ort.workspace = true
 
 # Utilities
 rayon.workspace = true
-log.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 # Serialization
 serde.workspace = true

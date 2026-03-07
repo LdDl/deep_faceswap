@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "deep-faceswap"
+name = "deep-faceswap-cli"
 path = "src/main.rs"
 
 [dependencies]
@@ -19,7 +19,3 @@ image.workspace = true
 # CLI
 clap.workspace = true
 indicatif.workspace = true
-
-# Logging
-log.workspace = true
-env_logger.workspace = true

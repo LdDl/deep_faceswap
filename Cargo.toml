@@ -14,15 +14,15 @@ license = "MIT"
 [workspace.dependencies]
 # Image processing
 image = "0.25"
-ndarray = "0.16"
+ndarray = "0.17"
 
 # ML/AI
-ort = { version = "2.0.0-rc.12", features = ["cuda", "copy-dylibs"] }
+ort = { version = "2.0.0-rc.12", features = ["copy-dylibs", "tracing"] }
 
 # Utilities
 rayon = "1.10"
-log = "0.4"
-env_logger = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

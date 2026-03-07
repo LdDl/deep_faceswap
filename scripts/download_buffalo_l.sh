@@ -1,35 +1,37 @@
 #!/bin/bash
-# Download buffalo_l models from HuggingFace
+# Download buffalo_l models from InsightFace
 
 set -e
 
 MODELS_DIR="$(dirname "$0")/../models"
 BUFFALO_DIR="$MODELS_DIR/buffalo_l"
+TMP_DIR="/tmp/buffalo_l_download_$$"
 
-echo "Downloading buffalo_l models from HuggingFace..."
+echo "Downloading buffalo_l models from InsightFace..."
 echo "Target directory: $BUFFALO_DIR"
 
 mkdir -p "$BUFFALO_DIR"
-
-# Base URL for HuggingFace
-BASE_URL="https://huggingface.co/immich-app/buffalo_l/resolve/main"
+mkdir -p "$TMP_DIR"
 
 # det_10g.onnx - YOLOv8n face detector
 # w600k_r50.onnx - ArcFace ResNet50 recognition
-MODELS=(
-    "det_10g.onnx"
-    "w600k_r50.onnx"
-)
+# Check if models already exist
+if [ -f "$BUFFALO_DIR/det_10g.onnx" ] && [ -f "$BUFFALO_DIR/w600k_r50.onnx" ]; then
+    echo "Models already exist, skipping download"
+    exit 0
+fi
 
-for model in "${MODELS[@]}"; do
-    if [ -f "$BUFFALO_DIR/$model" ]; then
-        echo "- $model already exists, skipping"
-    else
-        echo "Downloading $model..."
-        curl -L "$BASE_URL/$model" -o "$BUFFALO_DIR/$model"
-        echo "- $model downloaded"
-    fi
-done
+# Download buffalo_l.zip from InsightFace GitHub releases
+echo "Downloading buffalo_l.zip..."
+curl -L "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip" \
+    -o "$TMP_DIR/buffalo_l.zip"
+
+# Extract only needed models
+echo "Extracting models..."
+unzip -j "$TMP_DIR/buffalo_l.zip" "det_10g.onnx" "w600k_r50.onnx" -d "$BUFFALO_DIR"
+
+# Cleanup
+rm -rf "$TMP_DIR"
 
 echo ""
 echo "Buffalo_l models downloaded successfully!"
