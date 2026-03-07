@@ -2,6 +2,7 @@
 
 use crate::alignment;
 use crate::detection::FaceDetector;
+use crate::enhancer::FaceEnhancer;
 use crate::recognition::FaceRecognizer;
 use crate::swapper::FaceSwapper;
 use crate::types::{FaceSwapError, Result};
@@ -19,6 +20,8 @@ use crate::{log_additional, log_main};
 /// * `detector_model` - Path to detection model (det_10g.onnx)
 /// * `recognizer_model` - Path to recognition model (w600k_r50.onnx)
 /// * `swapper_model` - Path to swapper model (inswapper_128.onnx)
+/// * `enhancer_model` - Optional path to enhancement model (GFPGAN of version
+/// 1.4 is tested by me, but others may work too. If you are figured it out let me know)
 ///
 /// # Returns
 /// `Ok(())` on success, error otherwise
@@ -29,6 +32,7 @@ pub fn swap_faces(
     detector_model: &str,
     recognizer_model: &str,
     swapper_model: &str,
+    enhancer_model: Option<&str>,
 ) -> Result<()> {
     log_main!(
         "swap_init",
@@ -41,6 +45,9 @@ pub fn swap_faces(
     let mut detector = FaceDetector::new(detector_model)?;
     let mut recognizer = FaceRecognizer::new(recognizer_model)?;
     let mut swapper = FaceSwapper::new(swapper_model)?;
+    let mut enhancer = enhancer_model
+        .map(|path| FaceEnhancer::new(path))
+        .transpose()?;
 
     let source_img = img_io::load_image(source_path)?;
     let source_rgb = img_io::to_rgb8(&source_img);
@@ -102,13 +109,42 @@ pub fn swap_faces(
     let swapped_face = swapper.swap(&target_aligned.aligned_image, &source_embedding)?;
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
-    let result = alignment::paste_back(
+    let mut result = alignment::paste_back(
         &target_array,
         &swapped_face,
         &target_aligned.transform,
         &target_aligned.face.bbox,
         128,
     )?;
+
+    // Enhance face if enhancer is provided
+    // Extract face region at original resolution and enhance
+    if let Some(ref mut enhancer) = enhancer {
+        log_additional!("enhance_face", "Enhancing face at original resolution");
+
+        // Align target face from result image to 512x512 for enhancement
+        let target_aligned_512 = alignment::align_face(&result, target_face, 512)?;
+
+        // @debug: Convert aligned face to RGB image for debug
+        // let aligned_512_rgb = rgb::array_to_rgb(&target_aligned_512.aligned_image)?;
+        // img_io::save_image(&aligned_512_rgb, "/tmp/debug_before_gfpgan.jpg")?;
+
+        // Enhance the 512x512 aligned face
+        let enhanced_512 = enhancer.enhance(&target_aligned_512.aligned_image)?;
+
+        // @debug: Convert back to RGB for debug
+        // let enhanced_img_512 = rgb::array_to_rgb(&enhanced_512)?;
+        // img_io::save_image(&enhanced_img_512, "/tmp/debug_after_gfpgan.jpg")?;
+
+        // Paste enhanced face back into result
+        result = alignment::paste_back(
+            &result,
+            &enhanced_512,
+            &target_aligned_512.transform,
+            &target_aligned_512.face.bbox,
+            512,
+        )?;
+    }
 
     let result_img = rgb::array3_to_rgb(&result);
     img_io::save_image(&result_img, output_path)?;

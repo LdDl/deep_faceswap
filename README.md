@@ -17,11 +17,10 @@ Current:
 - Face detection using YOLOv8n from buffalo_l package
 - Face recognition using ArcFace w600k_r50
 - Face swapping using inswapper_128
+- Face enhancement using GFPGAN (optional)
 - CUDA acceleration support via ONNX Runtime
 
 Planned:
-- Swap faces (single source + target, 2 photos)
-- Add face enhancement
 - Add mouth mask
 - Video processing (single source + target)
 - Multiple faces (not available in CLI)
@@ -46,6 +45,40 @@ This will download:
 - `buffalo_l/det_10g.onnx` - Face detector (YOLOv8n)
 - `buffalo_l/w600k_r50.onnx` - Face recognizer (ArcFace ResNet50)
 - `inswapper_128.onnx` - Face swapper
+
+#### Optional: Face enhancement model
+
+If you want to use face enhancement (GFPGAN - https://github.com/TencentARC/GFPGAN), download and convert the model. I've tested it with `GFPGANv1.4.pth` only. Newer versions may not work properly, but if you tested and it worked, please let me know.
+
+1. Download the PyTorch model:
+
+```bash
+cd scripts
+./download_gfpgan.sh
+```
+
+This will download:
+- `GFPGANv1.4.pth` - Face enhancement model (PyTorch format, 333MB)
+
+2. Convert to ONNX format:
+
+```bash
+cd scripts/python
+python3 -m venv venv_torch2onnx
+source venv_torch2onnx/bin/activate
+pip install -r requirements-torch2onnx.txt
+python torch2onnx/torch2onnx.py --src_model_path ../../models/GFPGANv1.4.pth --dst_model_path ../../models/GFPGANv1.4.onnx
+deactivate
+# Clean up virtual environment if you don't need it anymore
+rm -rf venv_torch2onnx
+```
+
+This will create:
+- `GFPGANv1.4.onnx` - Converted model ready for ONNX inference
+
+Note 1: I've used Python 3.14.2. If you have a different version, it may work, but I haven't tested it.
+
+Note 2: The conversion process will install PyTorch CPU-only version, which is around 200MB. This is a one-time operation, and after conversion, you can remove the virtual environment if you want. GPU version of PyTorch is not required for conversion.
 
 ### 2. Build
 
@@ -88,6 +121,22 @@ deep-faceswap-cli swap \
   --output <output>
 ```
 
+### With face enhancement
+
+Add `--enhance` flag to improve the quality of the swapped face:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --enhance
+```
+
+This will use GFPGAN to enhance facial details after swapping. Make sure you have downloaded and converted the GFPGAN model first.
+
+Obviously inference time will increase significantly when using enhancement.
+
 ### Custom model paths
 
 ```bash
@@ -97,7 +146,9 @@ deep-faceswap-cli swap \
   --output output.jpg \
   --detector models/buffalo_l/det_10g.onnx \
   --recognizer models/buffalo_l/w600k_r50.onnx \
-  --swapper models/inswapper_128.onnx
+  --swapper models/inswapper_128.onnx \
+  --enhance \
+  --enhancer models/GFPGANv1.4.onnx
 ```
 
 ### Requirements
