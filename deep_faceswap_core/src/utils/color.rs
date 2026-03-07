@@ -1,6 +1,7 @@
 //! Color space conversion and color transfer utilities
 //!
-//! Provides RGB <-> CIE LAB conversion and LAB-based color transfer.
+//! IEC 61966-2-1, CIE 1976.
+//! Provides RGB <-> CIE LAB conversion and LAB-based color transfer. 
 //! Used in mouth mask blending to match the original mouth colors
 //! with the swapped face lighting.
 
