@@ -6,20 +6,34 @@ Rust implementation of face swapping. Basically a port of [Deep-Live-Cam](https:
 - [Work in progress](#work-in-progress)
 - [Quick start](#quick-start)
 - [CLI usage](#cli-usage)
+- [CUDA support](#cuda-support)
 - [Project structure](#project-structure)
 - [License](#license)
 
 ## Work in progress
 
-Basic face swap between two images (single source + single target):
-- Workspace structure (lib + CLI)
-- Download scripts for models
-- Face detection (YOLOv8n)
-- Face recognition (ArcFace)
-- Face swapping (inswapper_128)
-- CLI interface
+Current:
+- Basic face swap between two images (single source + single target)
+- Face detection using YOLOv8n from buffalo_l package
+- Face recognition using ArcFace w600k_r50
+- Face swapping using inswapper_128
+- CUDA acceleration support via ONNX Runtime
+
+Planned:
+- Swap faces (single source + target, 2 photos)
+- Add face enhancement
+- Add mouth mask
+- Video processing (single source + target)
+- Multiple faces (not available in CLI)
+- Online video (low priority)
 
 ## Quick start
+
+Clone the repository and navigate to the project directory:
+```bash
+git clone git@github.com:LdDl/deep-faceswap.git --depth 1
+cd deep-faceswap
+```
 
 ### 1. Download models
 
@@ -35,26 +49,78 @@ This will download:
 
 ### 2. Build
 
+CPU-only build:
 ```bash
 cargo build --release
+```
+
+Build with CUDA support:
+```bash
+cargo build --release --features cuda
 ```
 
 ### 3. Run
 
 ```bash
-./target/release/deep-faceswap swap \
+./target/release/deep-faceswap-cli swap \
   --source source.jpg \
   --target target.jpg \
   --output output.jpg
 ```
+
+The tool will:
+1. Load models (detector, recognizer, swapper)
+2. Detect faces in source and target images
+3. Extract source face embedding
+4. Align target face
+5. Swap faces
+6. Paste result back to target image
+7. Save output
 
 ## CLI usage
 
 ### Basic swap
 
 ```bash
-deep-faceswap swap -s <source> -t <target> -o <output>
+deep-faceswap-cli swap \
+  --source <source> \
+  --target <target> \
+  --output <output>
 ```
+
+### Custom model paths
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --detector models/buffalo_l/det_10g.onnx \
+  --recognizer models/buffalo_l/w600k_r50.onnx \
+  --swapper models/inswapper_128.onnx
+```
+
+### Requirements
+
+Stage 1 requires exactly one face in both source and target images. If no faces or multiple faces are detected, the tool will exit with an error.
+
+Note: Interactive face selection for multiple faces will be implemented in a later stage.
+
+## CUDA support
+
+To use CUDA acceleration:
+
+1. Install CUDA Toolkit and cuDNN. I've tested only with my current setup which is:
+- CUDA 13.1
+- cuDNN 9.18.1.3.-1.1
+- RTX 3060
+
+2. Build with CUDA feature:
+   ```bash
+   cargo build --release --features cuda
+   ```
+
+When built with the cuda feature, the tool will use CUDA for inference. If CUDA is not available at runtime, it will fall back to CPU.
 
 **Interactive Face Selection**: If multiple faces are detected, the CLI will save face crops to `./tmp/face_crops/` and prompt you to select which face to use.
 
