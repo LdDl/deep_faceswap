@@ -1,0 +1,25 @@
+[package]
+name = "deep_faceswap_core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Image processing
+image.workspace = true
+ndarray.workspace = true
+
+# ML/AI
+ort.workspace = true
+
+# Utilities
+rayon.workspace = true
+log.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+approx = "0.5"  # For float comparisons in tests

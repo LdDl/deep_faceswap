@@ -1,0 +1,25 @@
+[package]
+name = "deep_faceswap_cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "deep-faceswap"
+path = "src/main.rs"
+
+[dependencies]
+# Our core library
+deep_faceswap_core = { path = "../deep_faceswap_core" }
+
+# Image processing
+image.workspace = true
+
+# CLI
+clap.workspace = true
+indicatif.workspace = true
+
+# Logging
+log.workspace = true
+env_logger.workspace = true

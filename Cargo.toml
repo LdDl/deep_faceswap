@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "deep_faceswap_core",
+    "deep_faceswap_cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Dimitrii"]
+license = "MIT"
+
+[workspace.dependencies]
+# Image processing
+image = "0.25"
+ndarray = "0.16"
+
+# ML/AI
+ort = { version = "2.0.0-rc.12", features = ["cuda", "copy-dylibs"] }
+
+# Utilities
+rayon = "1.10"
+log = "0.4"
+env_logger = "0.11"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
