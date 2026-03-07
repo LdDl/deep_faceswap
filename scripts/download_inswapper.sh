@@ -16,13 +16,7 @@ if [ -f "$MODELS_DIR/$MODEL_FILE" ]; then
     echo "- $MODEL_FILE already exists, skipping"
 else
     echo "Downloading $MODEL_FILE..."
-    # Note: Update this URL with the correct HuggingFace repository
-    # Common sources:
-    # - https://huggingface.co/deepinsight/inswapper/resolve/main/inswapper_128.onnx
-    # - https://github.com/facefusion/facefusion-assets/releases/download/models/inswapper_128.onnx
-
-    # Using facefusion assets (more reliable)
-    curl -L "https://github.com/facefusion/facefusion-assets/releases/download/models/inswapper_128.onnx" \
+    curl -L "https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx?download=true" \
          -o "$MODELS_DIR/$MODEL_FILE"
 
     echo "- $MODEL_FILE downloaded"
