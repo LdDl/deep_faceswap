@@ -21,3 +21,14 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+scripts/venv_torch2onnx/
+*.egg-info/
+dist/
+build/
