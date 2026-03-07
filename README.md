@@ -18,10 +18,10 @@ Current:
 - Face recognition using ArcFace w600k_r50
 - Face swapping using inswapper_128
 - Face enhancement using GFPGAN (optional)
+- Mouth mask to preserve target's mouth expression (optional)
 - CUDA acceleration support via ONNX Runtime
 
 Planned:
-- Add mouth mask
 - Video processing (single source + target)
 - Multiple faces (not available in CLI)
 - Online video (low priority)
@@ -44,6 +44,7 @@ cd scripts
 This will download:
 - `buffalo_l/det_10g.onnx` - Face detector (YOLOv8n)
 - `buffalo_l/w600k_r50.onnx` - Face recognizer (ArcFace ResNet50)
+- `buffalo_l/2d106det.onnx` - 106-point facial landmark detector (for mouth mask feature). Note that even if you don't plan to use mouth mask feature, it will be downloaded still because it's not a big file and I simply don't want to maintain separate script for it currently.
 - `inswapper_128.onnx` - Face swapper
 
 #### Optional: Face enhancement model
@@ -137,6 +138,31 @@ This will use GFPGAN to enhance facial details after swapping. Make sure you hav
 
 Obviously inference time will increase significantly when using enhancement.
 
+### With mouth mask
+
+Add `--mouth-mask` flag to preserve the target's mouth expression. This is useful when the target has an open mouth (laughing, talking) but the source has a closed mouth:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --mouth-mask
+```
+
+The mouth mask uses a separate 106-point landmark detector (`2d106det.onnx`) to identify the mouth region, then blends the original mouth back into the swapped result.
+
+Can be combined with enhancement:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --mouth-mask \
+  --enhance
+```
+
 ### Custom model paths
 
 ```bash
@@ -148,7 +174,9 @@ deep-faceswap-cli swap \
   --recognizer models/buffalo_l/w600k_r50.onnx \
   --swapper models/inswapper_128.onnx \
   --enhance \
-  --enhancer models/GFPGANv1.4.onnx
+  --enhancer models/GFPGANv1.4.onnx \
+  --mouth-mask \
+  --landmark-model models/buffalo_l/2d106det.onnx
 ```
 
 ### Requirements
