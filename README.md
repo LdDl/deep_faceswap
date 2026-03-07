@@ -102,9 +102,13 @@ deep-faceswap-cli swap \
 
 ### Requirements
 
-Stage 1 requires exactly one face in both source and target images. If no faces or multiple faces are detected, the tool will exit with an error.
+- Rust toolchain. My setup is:
+  - cargo 1.93.0 (083ac5135 2025-12-15)
+  - rustc 1.93.0 (254b59607 2026-01-19)
 
-Note: Interactive face selection for multiple faces will be implemented in a later stage.
+- Downloaded models
+- Source and target images.
+- CUDA and cuDNN for GPU acceleration (optional, but recommended for better performance)
 
 ## CUDA support
 
@@ -124,6 +128,7 @@ When built with the cuda feature, the tool will use CUDA for inference. If CUDA 
 
 **Interactive Face Selection**: If multiple faces are detected, the CLI will save face crops to `./tmp/face_crops/` and prompt you to select which face to use.
 
+Current status for face selection: only max score face is automatically selected. Interactive selection is planned for future.
 ## Project structure
 
 @todo

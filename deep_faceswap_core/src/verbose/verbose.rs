@@ -69,9 +69,12 @@ pub fn init_logger() {
         let verbose_level = *VERBOSE_LEVEL.get().unwrap_or(&VerboseLevel::Main);
         let filter_str = match verbose_level {
             VerboseLevel::None => "error",
-            VerboseLevel::Main => "info,ort=off",  // Show our logs, hide ort logs
-            VerboseLevel::Additional => "debug,ort=warn",  // Show debug + ort warnings
-            VerboseLevel::All => "trace",  // Show everything
+            // Show our logs, hide ort logs
+            VerboseLevel::Main => "info,ort=off",
+            // Show debug + ort warnings
+            VerboseLevel::Additional => "debug,ort=warn",
+            // Show everything
+            VerboseLevel::All => "trace",
         };
         let env_filter =
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter_str));
@@ -82,7 +85,8 @@ pub fn init_logger() {
             .with(
                 tracing_fmt::layer()
                     .json()
-                    .with_target(false)  // Hide target again - we don't need it now
+                    // Hide target again - we don't need it now
+                    .with_target(false)
                     .with_thread_ids(false)
                     .with_thread_names(false)
                     .with_file(false)
@@ -248,7 +252,6 @@ macro_rules! log_additional {
 		}
 	};
 }
-
 
 #[macro_export]
 macro_rules! log_all {
