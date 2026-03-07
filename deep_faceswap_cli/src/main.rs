@@ -42,6 +42,14 @@ enum Commands {
         /// Path to swapper model
         #[arg(long, default_value = "models/inswapper_128.onnx")]
         swapper: String,
+
+        /// Enable face enhancement with GFPGAN
+        #[arg(long)]
+        enhance: bool,
+
+        /// Path to enhancement model
+        #[arg(long, default_value = "models/GFPGANv1.4.onnx")]
+        enhancer: String,
     },
 }
 
@@ -69,7 +77,10 @@ fn main() -> Result<()> {
             detector,
             recognizer,
             swapper,
+            enhance,
+            enhancer,
         } => {
+            let enhancer_model = if enhance { Some(enhancer.as_str()) } else { None };
             deep_faceswap_core::swap_faces(
                 &source,
                 &target,
@@ -77,6 +88,7 @@ fn main() -> Result<()> {
                 &detector,
                 &recognizer,
                 &swapper,
+                enhancer_model,
             )?;
         }
     }

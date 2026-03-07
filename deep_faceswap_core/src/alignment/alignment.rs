@@ -32,12 +32,23 @@ const LANDMARKS_128: [[f32; 2]; 5] = [
     [78.7299, 92.2041],
 ];
 
+// Standard landmarks for 512x512 alignment
+// These are the target positions for GFPGAN face enhancement
+// Calculated as: LANDMARKS_128 * (512/128) = LANDMARKS_128 * 4
+const LANDMARKS_512: [[f32; 2]; 5] = [
+    [185.1784, 207.8852],
+    [326.1272, 206.0056],
+    [256.1008, 285.4464],
+    [198.1972, 370.9620],
+    [313.9196, 368.8164],
+];
+
 /// Align face to target size using affine transformation
 ///
 /// # Arguments
 /// * `img` - Source image as Array3<u8> (H, W, 3)
 /// * `face` - Detected face with landmarks
-/// * `target_size` - Target size (112 or 128)
+/// * `target_size` - Target size (112, 128, or 512)
 ///
 /// # Returns
 /// AlignedFace containing face data, aligned image, and transformation matrix
@@ -45,9 +56,10 @@ pub fn align_face(img: &Array3<u8>, face: &DetectedFace, target_size: u32) -> Re
     let target_landmarks = match target_size {
         112 => &LANDMARKS_112,
         128 => &LANDMARKS_128,
+        512 => &LANDMARKS_512,
         _ => {
             return Err(FaceSwapError::InvalidInput(format!(
-                "Unsupported target size: {}. Use 112 or 128",
+                "Unsupported target size: {}. Use 112, 128, or 512",
                 target_size
             )))
         }

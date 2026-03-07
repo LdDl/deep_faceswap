@@ -6,11 +6,13 @@
 //! - Face detection (YOLOv8n from buffalo_l)
 //! - Face recognition (ArcFace w600k_r50 from buffalo_l)
 //! - Face swapping (inswapper_128)
+//! - Face enhancement (GFPGAN)
 
 pub mod types;
 
 pub mod alignment;
 pub mod detection;
+pub mod enhancer;
 pub mod recognition;
 pub mod swap;
 pub mod swapper;

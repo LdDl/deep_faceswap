@@ -17,11 +17,10 @@ Current:
 - Face detection using YOLOv8n from buffalo_l package
 - Face recognition using ArcFace w600k_r50
 - Face swapping using inswapper_128
+- Face enhancement using GFPGAN (optional)
 - CUDA acceleration support via ONNX Runtime
 
 Planned:
-- Swap faces (single source + target, 2 photos)
-- Add face enhancement
 - Add mouth mask
 - Video processing (single source + target)
 - Multiple faces (not available in CLI)
@@ -122,6 +121,22 @@ deep-faceswap-cli swap \
   --output <output>
 ```
 
+### With face enhancement
+
+Add `--enhance` flag to improve the quality of the swapped face:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --enhance
+```
+
+This will use GFPGAN to enhance facial details after swapping. Make sure you have downloaded and converted the GFPGAN model first.
+
+Obviously inference time will increase significantly when using enhancement.
+
 ### Custom model paths
 
 ```bash
@@ -131,7 +146,9 @@ deep-faceswap-cli swap \
   --output output.jpg \
   --detector models/buffalo_l/det_10g.onnx \
   --recognizer models/buffalo_l/w600k_r50.onnx \
-  --swapper models/inswapper_128.onnx
+  --swapper models/inswapper_128.onnx \
+  --enhance \
+  --enhancer models/GFPGANv1.4.onnx
 ```
 
 ### Requirements

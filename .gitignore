@@ -19,8 +19,9 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and debug
 *.log
+debug/
 
 # Python
 __pycache__/

@@ -55,6 +55,7 @@ pub const EVENT_FACE_DETECTED: &str = "face_detected";
 pub const EVENT_EXTRACT_EMBEDDING: &str = "extract_embedding";
 pub const EVENT_ALIGN_FACE: &str = "align_face";
 pub const EVENT_SWAP_FACE: &str = "swap_face";
+pub const EVENT_ENHANCE_FACE: &str = "enhance_face";
 pub const EVENT_PASTE_BACK: &str = "paste_back";
 pub const EVENT_SAVE_IMAGE: &str = "save_image";
 pub const EVENT_COMPLETE: &str = "complete";
