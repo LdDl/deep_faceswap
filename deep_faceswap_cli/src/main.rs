@@ -50,6 +50,14 @@ enum Commands {
         /// Path to enhancement model
         #[arg(long, default_value = "models/GFPGANv1.4.onnx")]
         enhancer: String,
+
+        /// Enable mouth mask to preserve target's mouth expression
+        #[arg(long)]
+        mouth_mask: bool,
+
+        /// Path to 106-point landmark model
+        #[arg(long, default_value = "models/buffalo_l/2d106det.onnx")]
+        landmark_model: String,
     },
 }
 
@@ -79,8 +87,11 @@ fn main() -> Result<()> {
             swapper,
             enhance,
             enhancer,
+            mouth_mask,
+            landmark_model,
         } => {
             let enhancer_model = if enhance { Some(enhancer.as_str()) } else { None };
+            let landmark_model = if mouth_mask { Some(landmark_model.as_str()) } else { None };
             deep_faceswap_core::swap_faces(
                 &source,
                 &target,
@@ -89,6 +100,8 @@ fn main() -> Result<()> {
                 &recognizer,
                 &swapper,
                 enhancer_model,
+                landmark_model,
+                mouth_mask,
             )?;
         }
     }
