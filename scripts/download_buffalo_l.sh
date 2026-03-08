@@ -15,8 +15,9 @@ mkdir -p "$TMP_DIR"
 
 # det_10g.onnx - YOLOv8n face detector
 # w600k_r50.onnx - ArcFace ResNet50 recognition
+# 2d106det.onnx - 106-point facial landmark detector for mouth mask feature
 # Check if models already exist
-if [ -f "$BUFFALO_DIR/det_10g.onnx" ] && [ -f "$BUFFALO_DIR/w600k_r50.onnx" ]; then
+if [ -f "$BUFFALO_DIR/det_10g.onnx" ] && [ -f "$BUFFALO_DIR/w600k_r50.onnx" ] && [ -f "$BUFFALO_DIR/2d106det.onnx" ]; then
     echo "Models already exist, skipping download"
     exit 0
 fi
@@ -28,7 +29,7 @@ curl -L "https://github.com/deepinsight/insightface/releases/download/v0.7/buffa
 
 # Extract only needed models
 echo "Extracting models..."
-unzip -j "$TMP_DIR/buffalo_l.zip" "det_10g.onnx" "w600k_r50.onnx" -d "$BUFFALO_DIR"
+unzip -j "$TMP_DIR/buffalo_l.zip" "det_10g.onnx" "w600k_r50.onnx" "2d106det.onnx" -d "$BUFFALO_DIR"
 
 # Cleanup
 rm -rf "$TMP_DIR"

@@ -3,6 +3,8 @@
 use crate::alignment;
 use crate::detection::FaceDetector;
 use crate::enhancer::FaceEnhancer;
+use crate::landmark::LandmarkDetector;
+use crate::mouth_mask;
 use crate::recognition::FaceRecognizer;
 use crate::swapper::FaceSwapper;
 use crate::types::{FaceSwapError, Result};
@@ -22,6 +24,9 @@ use crate::{log_additional, log_main};
 /// * `swapper_model` - Path to swapper model (inswapper_128.onnx)
 /// * `enhancer_model` - Optional path to enhancement model (GFPGAN of version
 /// 1.4 is tested by me, but others may work too. If you are figured it out let me know)
+/// * `landmark_model` - Optional path to 106-point landmark model (2d106det.onnx).
+/// Required when `mouth_mask` is true.
+/// * `mouth_mask` - Whether to apply mouth mask to preserve target's mouth expression
 ///
 /// # Returns
 /// `Ok(())` on success, error otherwise
@@ -33,6 +38,8 @@ pub fn swap_faces(
     recognizer_model: &str,
     swapper_model: &str,
     enhancer_model: Option<&str>,
+    landmark_model: Option<&str>,
+    use_mouth_mask: bool,
 ) -> Result<()> {
     log_main!(
         "swap_init",
@@ -48,6 +55,16 @@ pub fn swap_faces(
     let mut enhancer = enhancer_model
         .map(|path| FaceEnhancer::new(path))
         .transpose()?;
+    let mut landmark_detector = if use_mouth_mask {
+        let path = landmark_model.ok_or_else(|| {
+            FaceSwapError::InvalidInput(
+                "Landmark model path required when mouth mask is enabled".to_string(),
+            )
+        })?;
+        Some(LandmarkDetector::new(path)?)
+    } else {
+        None
+    };
 
     let source_img = img_io::load_image(source_path)?;
     let source_rgb = img_io::to_rgb8(&source_img);
@@ -99,6 +116,17 @@ pub fn swap_faces(
         );
     }
 
+    // Detect 106 landmarks on target face before swap (needed for mouth mask)
+    let mouth_mask_data = if let Some(ref mut lm_detector) = landmark_detector {
+        log_additional!("mouth_mask", "Detecting 106 landmarks on target face");
+        let landmarks = lm_detector.detect(&target_array, target_face)?;
+        let (frame_h, frame_w, _) = target_array.dim();
+        let data = mouth_mask::create_mouth_mask(&target_array, &landmarks, frame_h, frame_w)?;
+        Some(data)
+    } else {
+        None
+    };
+
     log_additional!(EVENT_ALIGN_FACE, "Aligning source face");
     let source_aligned = alignment::align_face(&source_array, source_face, 112)?;
     let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
@@ -116,6 +144,12 @@ pub fn swap_faces(
         &target_aligned.face.bbox,
         128,
     )?;
+
+    // Apply mouth mask after swap but before enhancement
+    if let Some(ref data) = mouth_mask_data {
+        log_additional!("mouth_mask", "Applying mouth mask");
+        mouth_mask::apply_mouth_mask(&mut result, data);
+    }
 
     // Enhance face if enhancer is provided
     // Extract face region at original resolution and enhance
