@@ -2,6 +2,20 @@ use clap::Parser;
 use deep_faceswap_core::verbose::{set_verbose_level, VerboseLevel};
 use deep_faceswap_core::Result;
 
+fn is_video_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    path_lower.ends_with(".mp4")
+        || path_lower.ends_with(".avi")
+        || path_lower.ends_with(".mov")
+        || path_lower.ends_with(".mkv")
+        || path_lower.ends_with(".webm")
+        || path_lower.ends_with(".flv")
+        || path_lower.ends_with(".wmv")
+        || path_lower.ends_with(".m4v")
+        || path_lower.ends_with(".mpg")
+        || path_lower.ends_with(".mpeg")
+}
+
 #[derive(Parser)]
 #[command(name = "deep-faceswap")]
 #[command(version = "0.1.0")]
@@ -17,17 +31,17 @@ struct Cli {
 
 #[derive(Parser)]
 enum Commands {
-    /// Swap faces between two images
+    /// Swap faces in images or videos (auto-detected by file extension)
     Swap {
         /// Path to source image(s) - single path or comma-separated list (e.g., img1.jpg,img2.jpg)
         #[arg(short, long)]
         source: String,
 
-        /// Path to target image (face to replace)
+        /// Path to target image or video (face to replace)
         #[arg(short, long)]
         target: String,
 
-        /// Path to output image
+        /// Path to output image or video
         #[arg(short, long)]
         output: String,
 
@@ -105,18 +119,34 @@ fn main() -> Result<()> {
             } else {
                 None
             };
-            deep_faceswap_core::swap_faces(
-                &source,
-                &target,
-                &output,
-                &detector,
-                &recognizer,
-                &swapper,
-                enhancer_model,
-                landmark_model,
-                mouth_mask,
-                multi_face,
-            )?;
+
+            if is_video_file(&target) {
+                deep_faceswap_core::swap_video(
+                    &source,
+                    &target,
+                    &output,
+                    &detector,
+                    &recognizer,
+                    &swapper,
+                    enhancer_model,
+                    landmark_model,
+                    mouth_mask,
+                    multi_face,
+                )?;
+            } else {
+                deep_faceswap_core::swap_faces(
+                    &source,
+                    &target,
+                    &output,
+                    &detector,
+                    &recognizer,
+                    &swapper,
+                    enhancer_model,
+                    landmark_model,
+                    mouth_mask,
+                    multi_face,
+                )?;
+            }
         }
     }
 

@@ -25,5 +25,5 @@ pub mod video;
 #[macro_use]
 pub mod verbose;
 
-pub use swap::swap_faces;
+pub use swap::{swap_faces, swap_video};
 pub use types::{FaceSwapError, Result};

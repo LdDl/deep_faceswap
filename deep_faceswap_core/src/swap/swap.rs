@@ -369,3 +369,34 @@ pub fn swap_faces(
     log_main!(EVENT_COMPLETE, "Face swap completed successfully");
     Ok(())
 }
+
+/// Swap faces in video files
+///
+/// # Arguments
+/// * `source_path` - Path to source image(s) - single path or comma-separated list
+/// * `target_path` - Path to target video
+/// * `output_path` - Path to output video
+/// * `detector_path` - Path to detection model
+/// * `recognizer_path` - Path to recognition model
+/// * `swapper_path` - Path to swapper model
+/// * `enhancer_path` - Optional path to enhancement model
+/// * `landmark_path` - Optional path to 106-point landmark model
+/// * `use_mouth_mask` - Enable mouth mask
+/// * `use_multi_face` - Enable multi-face processing with interactive mapping
+///
+/// # Returns
+/// Ok(()) on success
+pub fn swap_video(
+    source_path: &str,
+    target_path: &str,
+    output_path: &str,
+    detector_path: &str,
+    recognizer_path: &str,
+    swapper_path: &str,
+    enhancer_path: Option<&str>,
+    landmark_path: Option<&str>,
+    use_mouth_mask: bool,
+    use_multi_face: bool,
+) -> Result<()> {
+    todo!("Video processing not yet implemented");
+}
