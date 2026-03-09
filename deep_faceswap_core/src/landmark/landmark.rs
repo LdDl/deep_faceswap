@@ -123,7 +123,9 @@ impl LandmarkDetector {
         .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?;
 
         // Warp image to 192x192
-        let cropped = crate::utils::transform::warp_affine(image, &transform, LANDMARK_INPUT_SIZE)?;
+        // warp_affine expects inverse transform (aligned -> original mapping)
+        let inv_crop_transform = crate::utils::transform::invert_affine_transform(&transform)?;
+        let cropped = crate::utils::transform::warp_affine(image, &inv_crop_transform, LANDMARK_INPUT_SIZE)?;
 
         // Build NCHW tensor with RGB order, raw pixel values (0-255)
         // The 2d106det ONNX model has internal Sub/Mul normalization nodes,
@@ -135,6 +137,8 @@ impl LandmarkDetector {
                 let r = cropped[[y, x, 0]] as f32;
                 let g = cropped[[y, x, 1]] as f32;
                 let b = cropped[[y, x, 2]] as f32;
+                // RGB order! (not as OpenCV's one which has for dnn.blobFromImage:
+                // swapRB=True to convert BGR to RGB)
                 input_tensor[[0, 0, y, x]] = r;
                 input_tensor[[0, 1, y, x]] = g;
                 input_tensor[[0, 2, y, x]] = b;
