@@ -19,7 +19,7 @@ struct Cli {
 enum Commands {
     /// Swap faces between two images
     Swap {
-        /// Path to source image (face to extract)
+        /// Path to source image(s) - single path or comma-separated list (e.g., img1.jpg,img2.jpg)
         #[arg(short, long)]
         source: String,
 

@@ -15,6 +15,7 @@ pub mod detection;
 pub mod enhancer;
 pub mod landmark;
 pub mod mouth_mask;
+pub mod multi_face;
 pub mod recognition;
 pub mod swap;
 pub mod swapper;

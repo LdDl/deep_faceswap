@@ -19,11 +19,11 @@ Current:
 - Face swapping using inswapper_128
 - Face enhancement using GFPGAN (optional)
 - Mouth mask to preserve target's mouth expression (optional)
+- Multi-face support with interactive mapping
 - CUDA acceleration support via ONNX Runtime
 
 Planned:
 - Video processing (single source + target)
-- Multiple faces (not available in CLI)
 - Online video (low priority)
 
 ## Quick start
@@ -163,6 +163,49 @@ deep-faceswap-cli swap \
   --enhance
 ```
 
+### Multi-face support
+
+Add `--multi-face` flag to swap multiple faces with interactive mapping:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --multi-face
+```
+
+#### Multiple source images
+
+You can provide multiple source images as a comma-separated list. All faces from all source images will be aggregated and available for mapping:
+
+```bash
+deep-faceswap-cli swap \
+  --source img1.jpg,img2.jpg,img3.jpg \
+  --target group_photo.jpg \
+  --output output.jpg \
+  --multi-face
+```
+
+Face crops will be named with the source filename prefix (e.g., `img1_face_0.jpg`, `img2_face_0.jpg`) to help identify which image each face came from.
+
+If a source image contains no faces, a warning is logged and processing continues with the remaining images.
+
+#### Interactive face selection
+
+When multiple faces are detected, the CLI provides interactive face selection:
+
+- **1:1 case** (1 source, 1 target): No prompt, swaps automatically
+- **1:N case** (1 source, N targets): Prompts to select which target faces to swap (enter indices like `0,1` or `all`)
+- **N:1 case** (N sources, 1 target): Prompts to select which source face to use
+- **N:N case** (N sources, M targets): Prompts for full mapping in format `S:T,S:T` (e.g., `0:1,1:0`)
+
+Face crops are saved to `./tmp/face_crops/{source,target}/` for visual inspection before swapping.
+
+Without `--multi-face` flag, only the highest-score face from each image is used (backward compatible behavior).
+
+Multi-face mode works with `--enhance` and `--mouth-mask` flags - all swapped faces will be enhanced/masked accordingly.
+
 ### Custom model paths
 
 ```bash
@@ -205,9 +248,6 @@ To use CUDA acceleration:
 
 When built with the cuda feature, the tool will use CUDA for inference. If CUDA is not available at runtime, it will fall back to CPU.
 
-**Interactive Face Selection**: If multiple faces are detected, the CLI will save face crops to `./tmp/face_crops/` and prompt you to select which face to use.
-
-Current status for face selection: only max score face is automatically selected. Interactive selection is planned for future.
 ## Project structure
 
 @todo
