@@ -76,6 +76,10 @@ enum Commands {
         /// Process multiple faces with interactive mapping
         #[arg(long)]
         multi_face: bool,
+
+        /// Custom directory for temporary video frames (default: ./tmp/)
+        #[arg(long)]
+        video_tmp_dir: Option<String>,
     },
 }
 
@@ -108,6 +112,7 @@ fn main() -> Result<()> {
             mouth_mask,
             landmark_model,
             multi_face,
+            video_tmp_dir,
         } => {
             let enhancer_model = if enhance {
                 Some(enhancer.as_str())
@@ -132,6 +137,7 @@ fn main() -> Result<()> {
                     landmark_model,
                     mouth_mask,
                     multi_face,
+                    video_tmp_dir.as_deref(),
                 )?;
             } else {
                 deep_faceswap_core::swap_faces(

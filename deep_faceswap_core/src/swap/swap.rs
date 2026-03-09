@@ -12,8 +12,10 @@ use crate::types::{DetectedFace, FaceSwapError, Result, SourceFaceInfo};
 use crate::utils::image as img_io;
 use crate::utils::rgb;
 use crate::verbose::{EVENT_ALIGN_FACE, EVENT_COMPLETE, EVENT_FACE_DETECTED, EVENT_PASTE_BACK};
+use crate::video::extract_frames;
 use crate::{log_additional, log_main};
 use ndarray::Array3;
+use std::fs::create_dir_all;
 
 /// Swap a single source face into a single target face
 ///
@@ -123,6 +125,7 @@ fn swap_multiple_faces(
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
     use_mouth_mask: bool,
+    start_time: &std::time::Instant,
 ) -> Result<()> {
     // Build face mappings via interactive prompts
     let mappings = multi_face::build_face_mappings(
@@ -135,7 +138,8 @@ fn swap_multiple_faces(
     log_main!(
         "multi_face",
         "Processing face mappings",
-        count = mappings.len()
+        count = mappings.len(),
+        elapsed_s = start_time.elapsed().as_secs_f64()
     );
 
     // Extract embeddings for all source faces upfront
@@ -158,7 +162,8 @@ fn swap_multiple_faces(
             "multi_face",
             "Swapping face",
             source_idx = mapping.source_idx,
-            target_idx = mapping.target_idx
+            target_idx = mapping.target_idx,
+            elapsed_s = start_time.elapsed().as_secs_f64()
         );
 
         let source_info = &source_face_infos[mapping.source_idx];
@@ -211,13 +216,15 @@ pub fn swap_faces(
     use_mouth_mask: bool,
     use_multi_face: bool,
 ) -> Result<()> {
+    let start_time = std::time::Instant::now();
     log_main!(
         "swap_init",
         "Initializing face swap",
         source = source_path,
         target = target_path,
         output = output_path,
-        multi_face = use_multi_face
+        multi_face = use_multi_face,
+        elapsed_s = start_time.elapsed().as_secs_f64()
     );
 
     let mut detector = FaceDetector::new(detector_model)?;
@@ -251,13 +258,19 @@ pub fn swap_faces(
         let faces = detector.detect(&array, 0.5, 0.4)?;
 
         if faces.is_empty() {
-            log_main!("warn", "No faces detected in source image", path = path);
+            log_main!(
+                "warn",
+                "No faces detected in source image",
+                path = path,
+                elapsed_s = start_time.elapsed().as_secs_f64()
+            );
         } else {
             log_main!(
                 EVENT_FACE_DETECTED,
                 "Detected faces in source image",
                 path = path,
-                count = faces.len()
+                count = faces.len(),
+                elapsed_s = start_time.elapsed().as_secs_f64()
             );
 
             let filename = std::path::Path::new(path)
@@ -298,7 +311,8 @@ pub fn swap_faces(
     log_main!(
         EVENT_FACE_DETECTED,
         "Detected target faces",
-        count = target_faces.len()
+        count = target_faces.len(),
+        elapsed_s = start_time.elapsed().as_secs_f64()
     );
 
     let mut result = target_array.clone();
@@ -309,7 +323,8 @@ pub fn swap_faces(
             "multi_face",
             "Multi-face mode enabled",
             source_count = all_source_faces.len(),
-            target_count = target_faces.len()
+            target_count = target_faces.len(),
+            elapsed_s = start_time.elapsed().as_secs_f64()
         );
 
         swap_multiple_faces(
@@ -322,6 +337,7 @@ pub fn swap_faces(
             &mut enhancer,
             &mut landmark_detector,
             use_mouth_mask,
+            &start_time,
         )?;
     } else {
         // Single face swap (use first face from each)
@@ -335,7 +351,8 @@ pub fn swap_faces(
                 EVENT_FACE_DETECTED,
                 "Multiple source faces detected, using highest score",
                 filename = &source_face_info.source_filename,
-                score = source_face.det_score
+                score = source_face.det_score,
+                elapsed_s = start_time.elapsed().as_secs_f64()
             );
         }
 
@@ -343,7 +360,8 @@ pub fn swap_faces(
             log_main!(
                 EVENT_FACE_DETECTED,
                 "Multiple target faces, using highest score",
-                score = target_face.det_score
+                score = target_face.det_score,
+                elapsed_s = start_time.elapsed().as_secs_f64()
             );
         }
 
@@ -366,7 +384,11 @@ pub fn swap_faces(
     let result_img = rgb::array3_to_rgb(&result);
     img_io::save_image(&result_img, output_path)?;
 
-    log_main!(EVENT_COMPLETE, "Face swap completed successfully");
+    log_main!(
+        EVENT_COMPLETE,
+        "Face swap completed successfully",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
     Ok(())
 }
 
@@ -397,6 +419,214 @@ pub fn swap_video(
     landmark_path: Option<&str>,
     use_mouth_mask: bool,
     use_multi_face: bool,
+    video_tmp_dir: Option<&str>,
 ) -> Result<()> {
-    todo!("Video processing not yet implemented");
+    let start_time = std::time::Instant::now();
+    log_main!(
+        "video_processing",
+        "Starting video face swap",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+
+    log_additional!("load_models", "Loading models");
+    let mut detector = FaceDetector::new(detector_path)?;
+    let mut recognizer = FaceRecognizer::new(recognizer_path)?;
+    let mut swapper = FaceSwapper::new(swapper_path)?;
+
+    let mut enhancer = if let Some(path) = enhancer_path {
+        log_additional!("load_models", "Loading enhancement model");
+        Some(FaceEnhancer::new(path)?)
+    } else {
+        None
+    };
+
+    let mut landmark_detector = if let Some(path) = landmark_path {
+        log_additional!("load_models", "Loading landmark model");
+        Some(LandmarkDetector::new(path)?)
+    } else {
+        None
+    };
+
+    // Load and process source images
+    log_main!(
+        "load_source",
+        "Loading source images",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+    let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+    let mut source_images: Vec<Array3<u8>> = Vec::new();
+    let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
+
+    for (img_idx, path) in source_paths.iter().enumerate() {
+        log_additional!("load_image", "Loading source image", path = path);
+
+        let img = img_io::load_image(path)?;
+        let rgb = img_io::to_rgb8(&img);
+        let array = rgb::rgb_to_array3(&rgb);
+
+        let faces = detector.detect(&array, 0.5, 0.4)?;
+
+        if faces.is_empty() {
+            log_main!(
+                "warn",
+                "No faces detected in source image",
+                path = path,
+                elapsed_s = start_time.elapsed().as_secs_f64()
+            );
+        } else {
+            log_main!(
+                EVENT_FACE_DETECTED,
+                "Detected faces in source image",
+                path = path,
+                count = faces.len(),
+                elapsed_s = start_time.elapsed().as_secs_f64()
+            );
+
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+
+            for face in faces {
+                all_source_faces.push(SourceFaceInfo {
+                    face,
+                    source_image_index: img_idx,
+                    source_filename: filename.to_string(),
+                });
+            }
+        }
+
+        source_images.push(array);
+    }
+
+    if all_source_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+
+    log_main!(
+        EVENT_FACE_DETECTED,
+        "Total source faces across all images",
+        count = all_source_faces.len(),
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+
+    // Extract embeddings from source faces (cached for all frames)
+    log_main!(
+        "extract_embeddings",
+        "Extracting source face embeddings",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+    let source_face_info = &all_source_faces[0];
+    let source_face = &source_face_info.face;
+    let source_image = &source_images[source_face_info.source_image_index];
+
+    if all_source_faces.len() > 1 {
+        log_main!(
+            EVENT_FACE_DETECTED,
+            "Multiple source faces detected, using highest score",
+            filename = &source_face_info.source_filename,
+            score = source_face.det_score,
+            elapsed_s = start_time.elapsed().as_secs_f64()
+        );
+    }
+
+    let source_aligned = alignment::align_face(source_image, source_face, 112)?;
+    let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
+
+    // Extract frames from video
+    log_main!(
+        "video_extraction",
+        "Extracting frames from video",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+
+    let base_tmp_dir = video_tmp_dir.unwrap_or("./tmp");
+    let frames_dir = format!("{}/video_frames", base_tmp_dir);
+    let processed_frames_dir = format!("{}/video_frames_processed", base_tmp_dir);
+
+    create_dir_all(&frames_dir)?;
+    create_dir_all(&processed_frames_dir)?;
+
+    let frame_paths = extract_frames(target_path, &frames_dir)?;
+    let total_frames = frame_paths.len();
+
+    log_main!(
+        "video_extraction",
+        "Extraction complete",
+        total_frames = total_frames,
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+
+    log_main!(
+        "video_processing",
+        "Starting frame processing",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+
+    let log_interval = std::cmp::max(10, total_frames / 10);
+
+    // Process each frame
+    for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
+        let frame_img = img_io::load_image(frame_path)?;
+        let frame_rgb = img_io::to_rgb8(&frame_img);
+        let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+
+        let target_faces = detector.detect(&frame_array, 0.5, 0.4)?;
+
+        if !target_faces.is_empty() {
+            let target_face = &target_faces[0];
+
+            swap_single_pair(
+                &mut frame_array,
+                target_face,
+                source_image,
+                &source_embedding,
+                &mut swapper,
+                &mut enhancer,
+                &mut landmark_detector,
+                use_mouth_mask,
+            )?;
+        }
+
+        let processed_frame = rgb::array3_to_rgb(&frame_array);
+        let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
+        img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+
+        if (frame_idx + 1) % log_interval == 0 {
+            log_main!(
+                "video_processing",
+                "Processing frames",
+                processed = frame_idx + 1,
+                total = total_frames,
+                elapsed_s = start_time.elapsed().as_secs_f64()
+            );
+        }
+    }
+
+    log_main!(
+        "video_processing",
+        "All frames processed",
+        total = total_frames,
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+
+    // Encode processed frames back to video
+    log_main!(
+        "video_encoding",
+        "Encoding processed frames to video",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+    crate::video::encode_video(&processed_frames_dir, output_path, target_path)?;
+
+    // Cleanup temporary directories
+    log_additional!("cleanup", "Cleaning up temporary files");
+    std::fs::remove_dir_all(&frames_dir)?;
+    std::fs::remove_dir_all(&processed_frames_dir)?;
+
+    log_main!(
+        EVENT_COMPLETE,
+        "Video face swap completed successfully",
+        elapsed_s = start_time.elapsed().as_secs_f64()
+    );
+    Ok(())
 }

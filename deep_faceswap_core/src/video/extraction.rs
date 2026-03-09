@@ -45,8 +45,8 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
         let fps_value = fps.numerator() as f64 / fps.denominator() as f64;
 
         if duration > 0 && fps_value > 0.0 {
-            let duration_secs = duration as f64 * time_base.numerator() as f64
-                / time_base.denominator() as f64;
+            let duration_secs =
+                duration as f64 * time_base.numerator() as f64 / time_base.denominator() as f64;
             (duration_secs * fps_value) as usize
         } else {
             0
