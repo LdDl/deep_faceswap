@@ -38,6 +38,27 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
 
     let video_stream = input_ctx.stream(video_stream_index).unwrap();
 
+    let estimated_frames = {
+        let duration = video_stream.duration();
+        let time_base = video_stream.time_base();
+        let fps = video_stream.avg_frame_rate();
+        let fps_value = fps.numerator() as f64 / fps.denominator() as f64;
+
+        if duration > 0 && fps_value > 0.0 {
+            let duration_secs = duration as f64 * time_base.numerator() as f64
+                / time_base.denominator() as f64;
+            (duration_secs * fps_value) as usize
+        } else {
+            0
+        }
+    };
+
+    let log_interval = if estimated_frames > 0 {
+        std::cmp::max(10, estimated_frames / 10)
+    } else {
+        100
+    };
+
     let decoder_context =
         ffmpeg_next::codec::context::Context::from_parameters(video_stream.parameters()).map_err(
             |e| FaceSwapError::ProcessingError(format!("Failed to create decoder context: {}", e)),
@@ -66,8 +87,7 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
 
                 frame_count += 1;
 
-                // Log every 30 frames
-                if frame_count % 30 == 0 {
+                if frame_count % log_interval == 0 {
                     log_main!(
                         "video_extraction",
                         "Extracting frames",
