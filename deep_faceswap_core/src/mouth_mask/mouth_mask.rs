@@ -18,15 +18,17 @@ use crate::utils::color::color_transfer_lab;
 use ndarray::{s, Array2, Array3};
 
 // Landmark indices defining the mouth polygon (from 106-point set)
-const LOWER_LIP_ORDER: [usize; 20] = [
-    65, 66, 62, 70, 69, 18, 19, 20, 21, 22, 23, 24, 0, 8, 7, 6, 5, 4, 3, 2,
+const LOWER_LIP_ORDER: [usize; 21] = [
+    65, 66, 62, 70, 69, 18, 19, 20, 21, 22, 23, 24, 0, 8, 7, 6, 5, 4, 3, 2, 65,
 ];
 
-// Indices within LOWER_LIP_ORDER that should be extended toward top lip
-const TOP_LIP_INDICES: [usize; 7] = [0, 1, 2, 3, 4, 5, 19];
+// Indices within LOWER_LIP_ORDER array (not landmark indices!) for top lip
+// It maps to landmarks [2, 65, 66, 62, 70, 69, 18]
+const TOP_LIP_INDICES: [usize; 7] = [20, 0, 1, 2, 3, 4, 5];
 
-// Indices within LOWER_LIP_ORDER that should be extended toward chin
-const CHIN_INDICES: [usize; 6] = [9, 10, 11, 12, 13, 14];
+// Indices within LOWER_LIP_ORDER array (not landmark indices!) for chin
+// It maps to landmarks [24, 0, 8, 7, 6, 5]
+const CHIN_INDICES: [usize; 6] = [11, 12, 13, 14, 15, 16];
 
 // Expansion factor for the polygon outward from center
 const EXPANSION_FACTOR: f32 = 1.1;
