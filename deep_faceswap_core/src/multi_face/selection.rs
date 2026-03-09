@@ -1,7 +1,7 @@
 //! Face crop saving and mapping orchestration
 
-use crate::types::{DetectedFace, FaceCropInfo, FaceMapping, Result, SourceFaceInfo};
 use crate::multi_face::prompt;
+use crate::types::{DetectedFace, FaceCropInfo, FaceMapping, Result, SourceFaceInfo};
 use ndarray::Array3;
 use std::fs;
 

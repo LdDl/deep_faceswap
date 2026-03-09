@@ -20,6 +20,7 @@ pub mod recognition;
 pub mod swap;
 pub mod swapper;
 pub mod utils;
+pub mod video;
 
 #[macro_use]
 pub mod verbose;

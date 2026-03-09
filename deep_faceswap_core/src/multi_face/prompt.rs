@@ -5,7 +5,11 @@ use std::io::{self, Write};
 
 /// Print face crop information to console
 fn print_face_crops(crops: &[FaceCropInfo], label: &str) {
-    println!("\n{} faces saved to: ./tmp/face_crops/{}/", label, label.to_lowercase());
+    println!(
+        "\n{} faces saved to: ./tmp/face_crops/{}/",
+        label,
+        label.to_lowercase()
+    );
     for crop in crops {
         let filename_part = std::path::Path::new(&crop.crop_path)
             .file_stem()
@@ -14,17 +18,14 @@ fn print_face_crops(crops: &[FaceCropInfo], label: &str) {
             .unwrap_or("unknown");
 
         if label.to_lowercase() == "source" && filename_part != "face" {
-            println!("  [{}] {} - {} (score: {:.2})",
-                crop.index,
-                filename_part,
-                crop.crop_path,
-                crop.face.det_score
+            println!(
+                "  [{}] {} - {} (score: {:.2})",
+                crop.index, filename_part, crop.crop_path, crop.face.det_score
             );
         } else {
-            println!("  [{}] {} (score: {:.2})",
-                crop.index,
-                crop.crop_path,
-                crop.face.det_score
+            println!(
+                "  [{}] {} (score: {:.2})",
+                crop.index, crop.crop_path, crop.face.det_score
             );
         }
     }
@@ -46,7 +47,10 @@ pub fn prompt_target_selection(
     print_face_crops(source_crops, "Source");
     print_face_crops(target_crops, "Target");
 
-    println!("One source face detected, {} target faces detected.", target_crops.len());
+    println!(
+        "One source face detected, {} target faces detected.",
+        target_crops.len()
+    );
     println!("Enter target face indices to swap (comma-separated), or 'all' for all targets:");
     print!("> ");
     io::stdout().flush()?;
@@ -111,7 +115,10 @@ pub fn prompt_source_selection(
     print_face_crops(source_crops, "Source");
     print_face_crops(target_crops, "Target");
 
-    println!("{} source faces detected, one target face detected.", source_crops.len());
+    println!(
+        "{} source faces detected, one target face detected.",
+        source_crops.len()
+    );
     println!("Enter source face index to use:");
     print!("> ");
     io::stdout().flush()?;
@@ -157,8 +164,11 @@ pub fn prompt_full_mapping(
     print_face_crops(source_crops, "Source");
     print_face_crops(target_crops, "Target");
 
-    println!("{} source faces detected, {} target faces detected.",
-        source_crops.len(), target_crops.len());
+    println!(
+        "{} source faces detected, {} target faces detected.",
+        source_crops.len(),
+        target_crops.len()
+    );
     println!("Enter face mappings in format 'S:T,S:T' (e.g., '0:0,1:1'):");
     println!("Where S is source index and T is target index.");
     print!("> ");
