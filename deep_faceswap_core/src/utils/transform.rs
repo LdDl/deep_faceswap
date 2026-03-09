@@ -95,9 +95,6 @@ pub fn estimate_affine_transform(
 /// # Errors
 /// Returns error if the transformation is singular (determinant near zero)
 ///
-/// # Note
-/// Currently unused but kept for potential future use (face enhancement, debugging)
-#[allow(dead_code)]
 pub fn invert_affine_transform(transform: &Array2<f32>) -> Result<Array2<f32>> {
     let a = transform[[0, 0]];
     let b = transform[[0, 1]];
@@ -129,18 +126,20 @@ pub fn invert_affine_transform(transform: &Array2<f32>) -> Result<Array2<f32>> {
 /// Apply affine transformation to image
 ///
 /// Warps an image using an affine transformation matrix with bilinear interpolation.
-/// This is used to align detected faces to a canonical pose for recognition or swapping.
+/// Matches cv2.warpAffine behavior: for each output pixel (x,y), computes
+/// src = transform*(x,y) and samples from input image.
 ///
 /// # Arguments
 /// * `img` - Input image as HWC array (H, W, 3)
-/// * `transform` - 2x3 affine transformation matrix
+/// * `transform` - 2x3 affine transformation matrix mapping output_coords -> input_coords
 /// * `output_size` - Size of output square image (e.g., 112 or 128)
 ///
 /// # Returns
 /// Transformed image as HWC array (output_size, output_size, 3)
 ///
-/// # Algorithm
-/// Uses inverse mapping with bilinear interpolation for high-quality warping
+/// # Note
+/// For aligning face: pass M where M maps aligned_coords -> original_coords
+/// For pasting back: pass IM where IM maps original_coords -> aligned_coords
 pub fn warp_affine(
     img: &Array3<u8>,
     transform: &Array2<f32>,
@@ -155,26 +154,12 @@ pub fn warp_affine(
     let e = transform[[1, 1]];
     let f = transform[[1, 2]];
 
-    let det = a * e - b * d;
-    if det.abs() < AFFINE_EPS {
-        return Err(FaceSwapError::ProcessingError(
-            "Affine transform is singular".to_string(),
-        ));
-    }
-
-    let inv_a = e / det;
-    let inv_b = -b / det;
-    let inv_c = (b * f - e * c) / det;
-    let inv_d = -d / det;
-    let inv_e = a / det;
-    let inv_f = (d * c - a * f) / det;
-
     let (h, w, _) = (img.shape()[0], img.shape()[1], img.shape()[2]);
 
     for y in 0..output_size {
         for x in 0..output_size {
-            let src_x = inv_a * x as f32 + inv_b * y as f32 + inv_c;
-            let src_y = inv_d * x as f32 + inv_e * y as f32 + inv_f;
+            let src_x = a * x as f32 + b * y as f32 + c;
+            let src_y = d * x as f32 + e * y as f32 + f;
 
             if src_x >= 0.0 && src_x < (w - 1) as f32 && src_y >= 0.0 && src_y < (h - 1) as f32 {
                 let x0 = src_x.floor() as usize;
@@ -197,6 +182,71 @@ pub fn warp_affine(
 
                     result[[y, x, c]] = v.clamp(0.0, 255.0) as u8;
                 }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+/// Apply affine transformation to a single-channel mask
+///
+/// Warps a mask using an affine transformation matrix with bilinear interpolation.
+/// This is used to transform face masks back to the original image coordinates.
+/// https://docs.opencv.org/4.x/da/d54/group__imgproc__transform.html#ga0203d9ee5fcd28d40dbc4a1ea4451983
+/// 
+/// NOTE: Uses FORWARD mapping like cv2.warpAffine!
+///
+/// # Arguments
+/// * `mask` - Input mask as 2D array (H, W) with values 0-255
+/// * `forward_transform` - 2x3 FORWARD affine transformation matrix (original->aligned)
+/// * `output_h` - Height of output image
+/// * `output_w` - Width of output image
+///
+/// # Returns
+/// Transformed mask as 2D array (output_h, output_w)
+pub fn warp_affine_mask(
+    mask: &Array2<u8>,
+    forward_transform: &Array2<f32>,
+    output_h: usize,
+    output_w: usize,
+) -> Result<Array2<u8>> {
+    let mut result = Array2::zeros((output_h, output_w));
+
+    // Use forward transform and apply forward mapping
+    let a = forward_transform[[0, 0]];
+    let b = forward_transform[[0, 1]];
+    let c = forward_transform[[0, 2]];
+    let d = forward_transform[[1, 0]];
+    let e = forward_transform[[1, 1]];
+    let f = forward_transform[[1, 2]];
+
+    let (h, w) = (mask.nrows(), mask.ncols());
+
+    // FORWARD mapping: iterate over INPUT pixels and map to OUTPUT
+    for src_y in 0..h {
+        for src_x in 0..w {
+            let dst_x = a * src_x as f32 + b * src_y as f32 + c;
+            let dst_y = d * src_x as f32 + e * src_y as f32 + f;
+
+
+            if dst_x >= 0.0 && dst_x < (output_w - 1) as f32 && dst_y >= 0.0 && dst_y < (output_h - 1) as f32 {
+
+                let x0 = dst_x.floor() as usize;
+                let y0 = dst_y.floor() as usize;
+                let x1 = (x0 + 1).min(output_w - 1);
+                let y1 = (y0 + 1).min(output_h - 1);
+
+                let dx = dst_x - x0 as f32;
+                let dy = dst_y - y0 as f32;
+
+                let value = mask[[src_y, src_x]] as f32;
+
+                // Bilinear splatting
+                result[[y0, x0]] = (result[[y0, x0]] as f32 + value * (1.0 - dx) * (1.0 - dy)).clamp(0.0, 255.0) as u8;
+                result[[y0, x1]] = (result[[y0, x1]] as f32 + value * dx * (1.0 - dy)).clamp(0.0, 255.0) as u8;
+                result[[y1, x0]] = (result[[y1, x0]] as f32 + value * (1.0 - dx) * dy).clamp(0.0, 255.0) as u8;
+                result[[y1, x1]] = (result[[y1, x1]] as f32 + value * dx * dy).clamp(0.0, 255.0) as u8;
             }
         }
     }
@@ -355,5 +405,74 @@ mod tests {
         let singular = Array2::from_shape_vec((2, 3), vec![1.0, 1.0, 0.0, 1.0, 1.0, 0.0]).unwrap();
         let result = invert_affine_transform(&singular);
         assert!(result.is_err(), "Singular matrix should return error");
+    }
+
+    #[test]
+    fn test_warp_affine_identity() {
+        let mut img = Array3::<u8>::zeros((10, 10, 3));
+        img[[5, 5, 0]] = 100;
+        img[[5, 5, 1]] = 150;
+        img[[5, 5, 2]] = 200;
+
+        let identity = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]).unwrap();
+        let warped = warp_affine(&img, &identity, 10).unwrap();
+
+        assert_eq!(warped[[5, 5, 0]], 100, "Identity should preserve pixels");
+        assert_eq!(warped[[5, 5, 1]], 150, "Identity should preserve pixels");
+        assert_eq!(warped[[5, 5, 2]], 200, "Identity should preserve pixels");
+    }
+
+    #[test]
+    fn test_warp_affine_output_shape() {
+        let img = Array3::<u8>::zeros((10, 10, 3));
+        let identity = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]).unwrap();
+
+        let warped = warp_affine(&img, &identity, 15).unwrap();
+        assert_eq!(warped.shape(), &[15, 15, 3], "Output should match requested size");
+    }
+
+    #[test]
+    fn test_warp_affine_non_crash() {
+        let mut img = Array3::<u8>::zeros((10, 10, 3));
+        img[[5, 5, 0]] = 255;
+
+        let transform = Array2::from_shape_vec((2, 3), vec![0.5, 0.0, 2.0, 0.0, 0.5, 3.0]).unwrap();
+        let result = warp_affine(&img, &transform, 10);
+
+        assert!(result.is_ok(), "Warp should not crash with valid transform");
+    }
+
+    #[test]
+    fn test_warp_affine_mask_identity() {
+        let mask = Array2::from_shape_fn((10, 10), |(y, x)| {
+            if y >= 3 && y < 7 && x >= 3 && x < 7 { 255u8 } else { 0u8 }
+        });
+
+        let identity = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]).unwrap();
+        let warped = warp_affine_mask(&mask, &identity, 10, 10).unwrap();
+
+        for y in 0..10 {
+            for x in 0..10 {
+                assert_eq!(
+                    warped[[y, x]], mask[[y, x]],
+                    "Identity should preserve mask"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_warp_affine_mask_scale() {
+        let mut mask = Array2::<u8>::zeros((20, 20));
+        for y in 8..12 {
+            for x in 8..12 {
+                mask[[y, x]] = 255;
+            }
+        }
+
+        let scale = Array2::from_shape_vec((2, 3), vec![0.5, 0.0, 0.0, 0.0, 0.5, 0.0]).unwrap();
+        let warped = warp_affine_mask(&mask, &scale, 10, 10).unwrap();
+
+        assert!(warped[[5, 5]] > 0, "Center of scaled mask should have value");
     }
 }
