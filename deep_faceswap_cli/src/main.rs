@@ -58,6 +58,10 @@ enum Commands {
         /// Path to 106-point landmark model
         #[arg(long, default_value = "models/buffalo_l/2d106det.onnx")]
         landmark_model: String,
+
+        /// Process multiple faces with interactive mapping
+        #[arg(long)]
+        multi_face: bool,
     },
 }
 
@@ -89,9 +93,18 @@ fn main() -> Result<()> {
             enhancer,
             mouth_mask,
             landmark_model,
+            multi_face,
         } => {
-            let enhancer_model = if enhance { Some(enhancer.as_str()) } else { None };
-            let landmark_model = if mouth_mask { Some(landmark_model.as_str()) } else { None };
+            let enhancer_model = if enhance {
+                Some(enhancer.as_str())
+            } else {
+                None
+            };
+            let landmark_model = if mouth_mask {
+                Some(landmark_model.as_str())
+            } else {
+                None
+            };
             deep_faceswap_core::swap_faces(
                 &source,
                 &target,
@@ -102,6 +115,7 @@ fn main() -> Result<()> {
                 enhancer_model,
                 landmark_model,
                 mouth_mask,
+                multi_face,
             )?;
         }
     }

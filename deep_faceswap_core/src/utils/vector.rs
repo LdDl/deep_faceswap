@@ -55,7 +55,10 @@ mod tests {
         assert!((vec[1] - 4.0 / expected_norm).abs() < EPS);
 
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < EPS, "Normalized vector should have norm 1.0");
+        assert!(
+            (norm - 1.0).abs() < EPS,
+            "Normalized vector should have norm 1.0"
+        );
     }
 
     #[test]
@@ -87,6 +90,9 @@ mod tests {
         l2_normalize(&mut vec);
 
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < EPS, "Normalized 512-d vector should have norm 1.0");
+        assert!(
+            (norm - 1.0).abs() < EPS,
+            "Normalized 512-d vector should have norm 1.0"
+        );
     }
 }

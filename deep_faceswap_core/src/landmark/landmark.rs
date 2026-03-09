@@ -17,6 +17,7 @@
 use crate::types::{DetectedFace, FaceSwapError, Result};
 use crate::verbose::{get_verbose_level, VerboseLevel, EVENT_LOAD_MODEL};
 use crate::{log_additional, log_main};
+use crate::utils::transform::warp_affine;
 use ndarray::{Array2, Array4};
 use ort::{
     inputs,
@@ -116,14 +117,13 @@ impl LandmarkDetector {
         let tx = half_out - cx * scale;
         let ty = half_out - cy * scale;
 
-        let transform = Array2::from_shape_vec(
-            (2, 3),
-            vec![scale, 0.0, tx, 0.0, scale, ty],
-        )
-        .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?;
+        let transform = Array2::from_shape_vec((2, 3), vec![scale, 0.0, tx, 0.0, scale, ty])
+            .map_err(|e| FaceSwapError::ProcessingError(format!("{}", e)))?;
 
         // Warp image to 192x192
-        let cropped = crate::utils::transform::warp_affine(image, &transform, LANDMARK_INPUT_SIZE)?;
+        // warp_affine expects inverse transform (aligned -> original mapping)
+        let inv_crop_transform = crate::utils::transform::invert_affine_transform(&transform)?;
+        let cropped = warp_affine(image, &inv_crop_transform, LANDMARK_INPUT_SIZE)?;
 
         // Build NCHW tensor with RGB order, raw pixel values (0-255)
         // The 2d106det ONNX model has internal Sub/Mul normalization nodes,
@@ -135,6 +135,8 @@ impl LandmarkDetector {
                 let r = cropped[[y, x, 0]] as f32;
                 let g = cropped[[y, x, 1]] as f32;
                 let b = cropped[[y, x, 2]] as f32;
+                // RGB order! (not as OpenCV's one which has for dnn.blobFromImage:
+                // swapRB=True to convert BGR to RGB)
                 input_tensor[[0, 0, y, x]] = r;
                 input_tensor[[0, 1, y, x]] = g;
                 input_tensor[[0, 2, y, x]] = b;
@@ -169,8 +171,10 @@ impl LandmarkDetector {
         for i in 0..LANDMARK_NUM_POINTS {
             let px = landmarks_192[i][0];
             let py = landmarks_192[i][1];
-            let orig_x = inv_transform[[0, 0]] * px + inv_transform[[0, 1]] * py + inv_transform[[0, 2]];
-            let orig_y = inv_transform[[1, 0]] * px + inv_transform[[1, 1]] * py + inv_transform[[1, 2]];
+            let orig_x =
+                inv_transform[[0, 0]] * px + inv_transform[[0, 1]] * py + inv_transform[[0, 2]];
+            let orig_y =
+                inv_transform[[1, 0]] * px + inv_transform[[1, 1]] * py + inv_transform[[1, 2]];
             landmarks[i][0] = orig_x.clamp(0.0, (img_w - 1) as f32);
             landmarks[i][1] = orig_y.clamp(0.0, (img_h - 1) as f32);
         }

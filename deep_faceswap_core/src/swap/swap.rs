@@ -27,6 +27,7 @@ use crate::{log_additional, log_main};
 /// * `landmark_model` - Optional path to 106-point landmark model (2d106det.onnx).
 /// Required when `mouth_mask` is true.
 /// * `mouth_mask` - Whether to apply mouth mask to preserve target's mouth expression
+/// * `multi_face` - Whether to enable multi-face processing with interactive mapping
 ///
 /// # Returns
 /// `Ok(())` on success, error otherwise
@@ -40,13 +41,15 @@ pub fn swap_faces(
     enhancer_model: Option<&str>,
     landmark_model: Option<&str>,
     use_mouth_mask: bool,
+    use_multi_face: bool,
 ) -> Result<()> {
     log_main!(
         "swap_init",
         "Initializing face swap",
         source = source_path,
         target = target_path,
-        output = output_path
+        output = output_path,
+        multi_face = use_multi_face
     );
 
     let mut detector = FaceDetector::new(detector_model)?;

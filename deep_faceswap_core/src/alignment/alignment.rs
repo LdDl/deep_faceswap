@@ -5,7 +5,9 @@
 //! - Pasting swapped faces back into original images
 
 use crate::types::{AlignedFace, DetectedFace, FaceSwapError, Result};
-use crate::utils::transform::{estimate_affine_transform, warp_affine};
+use crate::utils::blur::gaussian_blur_2d;
+use crate::utils::cv::erode_mask_optimized;
+use crate::utils::transform::{estimate_affine_transform, invert_affine_transform, warp_affine};
 use ndarray::{Array2, Array3, Array4};
 
 // Standard landmarks for 112x112 alignment
@@ -66,7 +68,12 @@ pub fn align_face(img: &Array3<u8>, face: &DetectedFace, target_size: u32) -> Re
     };
 
     let transform = estimate_affine_transform(&face.landmarks, target_landmarks)?;
-    let aligned = warp_affine(img, &transform, target_size as usize)?;
+
+    // warp_affine expects aligned_coords -> original_coords
+    // transform is: original_coords -> aligned_coords
+    // So we need inverse? It is aligned_coords -> original_coords
+    let inverse_for_warp = invert_affine_transform(&transform)?;
+    let aligned = warp_affine(img, &inverse_for_warp, target_size as usize)?;
 
     let mut aligned_image = Array4::zeros((1, 3, target_size as usize, target_size as usize));
     for y in 0..target_size as usize {
@@ -84,31 +91,50 @@ pub fn align_face(img: &Array3<u8>, face: &DetectedFace, target_size: u32) -> Re
     })
 }
 
-/// Paste swapped face back to original image
+/// Paste swapped face back to original image with feathered mask blending
+///
+/// Creates a smooth blend between swapped face and original image using:
+/// 1. White mask creation and inverse warping back to original coordinates
+/// 2. Erosion to shrink mask inward from edges
+/// 3. Gaussian blur for smooth feathering
+/// 4. Alpha blending: result = mask * swapped + (1-mask) * original
+///
+/// This prevents hard rectangular boundaries visible in the output.
 ///
 /// # Arguments
 /// * `target_img` - Target image as Array3<u8> (H, W, 3)
 /// * `swapped_face` - Swapped face as Array4<f32> (1, 3, size, size), normalized
 /// * `align_transform` - Original alignment transformation matrix from align_face
 /// * `bbox` - Face bounding box for region optimization
-/// * `face_size` - Size of swapped face (128)
+/// * `face_size` - Size of swapped face (128, 512)
 ///
 /// # Returns
-/// Target image with swapped face pasted
+/// Target image with swapped face pasted using feathered mask
 pub fn paste_back(
     target_img: &Array3<u8>,
     swapped_face: &Array4<f32>,
     align_transform: &Array2<f32>,
-    bbox: &crate::types::BBox,
+    _bbox: &crate::types::BBox,
     face_size: u32,
 ) -> Result<Array3<u8>> {
-    let swapped_u8 =
-        Array3::from_shape_fn((face_size as usize, face_size as usize, 3), |(y, x, c)| {
-            (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
-        });
+    let face_size_usize = face_size as usize;
 
-    let mut result = target_img.clone();
+    // Convert swapped face from normalized f32 to u8
+    let swapped_u8 = Array3::from_shape_fn((face_size_usize, face_size_usize, 3), |(y, x, c)| {
+        (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
+    });
 
+    let (h, w, _) = (
+        target_img.shape()[0],
+        target_img.shape()[1],
+        target_img.shape()[2],
+    );
+
+    // Create white mask in aligned face space
+    let white_mask = Array2::from_elem((face_size_usize, face_size_usize), 255.0f32);
+
+    // align_transform is original->aligned (stored in AlignedFace from estimate_affine_transform)
+    // For warping back, we need original->aligned to map target pixels to aligned space
     let a = align_transform[[0, 0]];
     let b = align_transform[[0, 1]];
     let c = align_transform[[0, 2]];
@@ -116,15 +142,10 @@ pub fn paste_back(
     let e = align_transform[[1, 1]];
     let f = align_transform[[1, 2]];
 
-    let (h, w, _) = (result.shape()[0], result.shape()[1], result.shape()[2]);
-
-    let x_min = bbox.x1.max(0.0) as usize;
-    let y_min = bbox.y1.max(0.0) as usize;
-    let x_max = (bbox.x2.min(w as f32) as usize).min(w);
-    let y_max = (bbox.y2.min(h as f32) as usize).min(h);
-
-    for y in y_min..y_max {
-        for x in x_min..x_max {
+    // Warp mask: for each pixel in target image, find source in aligned space
+    let mut warped_mask = Array2::zeros((h, w));
+    for y in 0..h {
+        for x in 0..w {
             let src_x = a * x as f32 + b * y as f32 + c;
             let src_y = d * x as f32 + e * y as f32 + f;
 
@@ -135,8 +156,57 @@ pub fn paste_back(
             {
                 let x0 = src_x.floor() as usize;
                 let y0 = src_y.floor() as usize;
-                let x1 = (x0 + 1).min(face_size as usize - 1);
-                let y1 = (y0 + 1).min(face_size as usize - 1);
+                let x1 = (x0 + 1).min(face_size_usize - 1);
+                let y1 = (y0 + 1).min(face_size_usize - 1);
+
+                let dx = src_x - x0 as f32;
+                let dy = src_y - y0 as f32;
+
+                let v00 = white_mask[[y0, x0]];
+                let v01 = white_mask[[y0, x1]];
+                let v10 = white_mask[[y1, x0]];
+                let v11 = white_mask[[y1, x1]];
+
+                let v0 = v00 * (1.0 - dx) + v01 * dx;
+                let v1 = v10 * (1.0 - dx) + v11 * dx;
+                let v = v0 * (1.0 - dy) + v1 * dy;
+
+                warped_mask[[y, x]] = v as u8;
+            }
+        }
+    }
+
+    // Threshold: white iimage[white>20] = 255
+    for y in 0..h {
+        for x in 0..w {
+            if warped_mask[[y, x]] > 20 {
+                warped_mask[[y, x]] = 255;
+            } else {
+                warped_mask[[y, x]] = 0;
+            }
+        }
+    }
+
+    // Warp swapped face using same transform
+    let mut warped_face = Array3::zeros((h, w, 3));
+    for y in 0..h {
+        for x in 0..w {
+            if warped_mask[[y, x]] == 0 {
+                continue;
+            }
+
+            let src_x = a * x as f32 + b * y as f32 + c;
+            let src_y = d * x as f32 + e * y as f32 + f;
+
+            if src_x >= 0.0
+                && src_x < (face_size - 1) as f32
+                && src_y >= 0.0
+                && src_y < (face_size - 1) as f32
+            {
+                let x0 = src_x.floor() as usize;
+                let y0 = src_y.floor() as usize;
+                let x1 = (x0 + 1).min(face_size_usize - 1);
+                let y1 = (y0 + 1).min(face_size_usize - 1);
 
                 let dx = src_x - x0 as f32;
                 let dy = src_y - y0 as f32;
@@ -151,8 +221,66 @@ pub fn paste_back(
                     let v1 = v10 * (1.0 - dx) + v11 * dx;
                     let v = v0 * (1.0 - dy) + v1 * dy;
 
-                    result[[y, x, ch]] = v.clamp(0.0, 255.0) as u8;
+                    warped_face[[y, x, ch]] = v;
                 }
+            }
+        }
+    }
+
+    // Calculate mask size for erosion kernel
+    let mask_h_inds: Vec<usize> = (0..h)
+        .filter(|&y| (0..w).any(|x| warped_mask[[y, x]] == 255))
+        .collect();
+    let mask_w_inds: Vec<usize> = (0..w)
+        .filter(|&x| (0..h).any(|y| warped_mask[[y, x]] == 255))
+        .collect();
+
+    let mask_h = if !mask_h_inds.is_empty() {
+        mask_h_inds[mask_h_inds.len() - 1] - mask_h_inds[0]
+    } else {
+        0
+    };
+    let mask_w = if !mask_w_inds.is_empty() {
+        mask_w_inds[mask_w_inds.len() - 1] - mask_w_inds[0]
+    } else {
+        0
+    };
+
+    let mask_size = ((mask_h * mask_w) as f32).sqrt() as usize;
+
+    // Erosion kernel size: mask_size // 10, minimum 10
+    let erosion_k = (mask_size / 10).max(10);
+    let erosion_k = if erosion_k % 2 == 0 {
+        erosion_k + 1
+    } else {
+        erosion_k
+    };
+
+    // Apply erosion to shrink mask inward
+    let eroded_mask = erode_mask_optimized(&warped_mask, erosion_k);
+
+    // Apply Gaussian blur
+    // Kernel size: should be odd and positive
+    let k = (mask_size / 20).max(5);
+    let blur_k = 2 * k + 1;
+
+    // Convert mask to f32 and apply Gaussian blur for feathering
+    let eroded_mask_f32 = eroded_mask.mapv(|v| v as f32);
+    let blurred_mask = gaussian_blur_2d(&eroded_mask_f32, blur_k);
+
+    // Normalize mask to [0.0, 1.0] range for alpha blending
+    let alpha_mask = blurred_mask.mapv(|v| v / 255.0);
+
+    // Alpha blend: result = alpha_mask * warped_face + (1 - alpha_mask) * target_img
+    let mut result = target_img.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let alpha = alpha_mask[[y, x]];
+            for ch in 0..3 {
+                let swapped_val = warped_face[[y, x, ch]];
+                let original_val = target_img[[y, x, ch]] as f32;
+                let blended = alpha * swapped_val + (1.0 - alpha) * original_val;
+                result[[y, x, ch]] = blended.clamp(0.0, 255.0) as u8;
             }
         }
     }
