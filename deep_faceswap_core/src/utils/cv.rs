@@ -115,6 +115,10 @@ pub fn apply_nms(detections: &[DetectedFace], iou_threshold: f32) -> Vec<Detecte
 /// // Edges are removed (turned black)
 /// assert_eq!(eroded[[2, 2]], 0);
 /// ```
+#[deprecated(
+    since = "0.1.0",
+    note = "Use erode_mask_optimized instead for 5x better performance (especially in debug builds)"
+)]
 pub fn erode_mask(mask: &Array2<u8>, kernel_size: usize) -> Array2<u8> {
     assert!(kernel_size >= 3 && kernel_size % 2 == 1, "Kernel size must be odd and >= 3");
 
@@ -143,6 +147,81 @@ pub fn erode_mask(mask: &Array2<u8>, kernel_size: usize) -> Array2<u8> {
             }
 
             output[[y, x]] = if all_white { 255 } else { 0 };
+        }
+    }
+
+    output
+}
+
+/// Optimized erosion using separable passes for square kernels.
+///
+/// Erosion shrinks white regions by removing pixels at their boundaries.
+/// A pixel remains white (255) only if ALL pixels in its kernel neighborhood are white.
+/// This operation creates an inward offset from mask edges, useful for avoiding hard boundaries.
+///
+/// This optimized version uses separable decomposition:
+/// 1. Horizontal pass: erode each row independently
+/// 2. Vertical pass: erode each column of the result
+///
+/// This reduces complexity from O(h × w × k²) to O(h × w × k),
+/// providing approximately k× speedup (e.g., 5-11× for typical kernels).
+///
+/// # Arguments
+/// * `mask` - Input 2D mask (u8 values, typically 0 or 255)
+/// * `kernel_size` - Size of square erosion kernel (must be odd, typically 3-21)
+///
+/// # Returns
+/// Eroded mask with same dimensions as input
+///
+/// # Example
+/// ```
+/// use ndarray::Array2;
+/// use deep_faceswap_core::utils::cv::erode_mask_optimized;
+///
+/// let mut mask = Array2::<u8>::zeros((10, 10));
+/// // Create a 6x6 white square in the center
+/// for y in 2..8 {
+///     for x in 2..8 {
+///         mask[[y, x]] = 255;
+///     }
+/// }
+///
+/// let eroded = erode_mask_optimized(&mask, 3);
+///
+/// // Center remains white
+/// assert_eq!(eroded[[5, 5]], 255);
+/// // Edges are removed (turned black)
+/// assert_eq!(eroded[[2, 2]], 0);
+/// ```
+pub fn erode_mask_optimized(mask: &Array2<u8>, kernel_size: usize) -> Array2<u8> {
+    assert!(kernel_size >= 3 && kernel_size % 2 == 1, "Kernel size must be odd and >= 3");
+
+    let (h, w) = (mask.nrows(), mask.ncols());
+    let half = (kernel_size / 2) as isize;
+
+    // Horizontal pass: erode each row
+    let mut temp = Array2::<u8>::from_elem((h, w), 255);
+    for y in 0..h {
+        for x in 0..w {
+            let mut min_val = 255u8;
+            for kx in -half..=half {
+                let nx = (x as isize + kx).max(0).min((w - 1) as isize) as usize;
+                min_val = min_val.min(mask[[y, nx]]);
+            }
+            temp[[y, x]] = min_val;
+        }
+    }
+
+    // Vertical pass: erode each column
+    let mut output = Array2::<u8>::from_elem((h, w), 255);
+    for y in 0..h {
+        for x in 0..w {
+            let mut min_val = 255u8;
+            for ky in -half..=half {
+                let ny = (y as isize + ky).max(0).min((h - 1) as isize) as usize;
+                min_val = min_val.min(temp[[ny, x]]);
+            }
+            output[[y, x]] = min_val;
         }
     }
 
@@ -392,5 +471,78 @@ mod tests {
     fn test_erode_mask_too_small_kernel_panics() {
         let mask = Array2::<u8>::zeros((10, 10));
         erode_mask(&mask, 1);
+    }
+
+    #[test]
+    fn test_erode_optimized_matches_original_simple() {
+        let mut mask = Array2::<u8>::zeros((10, 10));
+        for y in 2..8 {
+            for x in 2..8 {
+                mask[[y, x]] = 255;
+            }
+        }
+
+        let original = erode_mask(&mask, 3);
+        let optimized = erode_mask_optimized(&mask, 3);
+
+        for y in 0..10 {
+            for x in 0..10 {
+                assert_eq!(
+                    original[[y, x]], optimized[[y, x]],
+                    "Mismatch at ({}, {}): {} vs {}",
+                    y, x, original[[y, x]], optimized[[y, x]]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_erode_optimized_matches_original_large() {
+        let mut mask = Array2::<u8>::zeros((100, 100));
+        for y in 20..80 {
+            for x in 20..80 {
+                mask[[y, x]] = 255;
+            }
+        }
+
+        let original = erode_mask(&mask, 11);
+        let optimized = erode_mask_optimized(&mask, 11);
+
+        for y in 0..100 {
+            for x in 0..100 {
+                assert_eq!(
+                    original[[y, x]], optimized[[y, x]],
+                    "Mismatch at ({}, {}): {} vs {}",
+                    y, x, original[[y, x]], optimized[[y, x]]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_erode_optimized_matches_original_complex() {
+        let mut mask = Array2::<u8>::zeros((50, 50));
+        mask[[10, 10]] = 255;
+        mask[[10, 11]] = 255;
+        mask[[11, 10]] = 255;
+        mask[[11, 11]] = 255;
+        for y in 20..40 {
+            for x in 20..40 {
+                mask[[y, x]] = 255;
+            }
+        }
+
+        let original = erode_mask(&mask, 5);
+        let optimized = erode_mask_optimized(&mask, 5);
+
+        for y in 0..50 {
+            for x in 0..50 {
+                assert_eq!(
+                    original[[y, x]], optimized[[y, x]],
+                    "Mismatch at ({}, {}): {} vs {}",
+                    y, x, original[[y, x]], optimized[[y, x]]
+                );
+            }
+        }
     }
 }
