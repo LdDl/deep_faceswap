@@ -23,6 +23,7 @@ Thumbs.db
 *.log
 debug/
 test.sh
+tmp/
 
 # Python
 __pycache__/

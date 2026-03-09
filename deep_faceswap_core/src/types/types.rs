@@ -23,6 +23,10 @@ pub enum FaceSwapError {
     NotImplemented(String),
     /// Error during image processing or transformation
     ProcessingError(String),
+    /// Invalid face mapping provided (indices out of range)
+    InvalidMapping(String),
+    /// User cancelled interactive selection
+    UserCancelled,
 }
 
 impl fmt::Display for FaceSwapError {
@@ -39,6 +43,8 @@ impl fmt::Display for FaceSwapError {
             Self::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
             Self::NotImplemented(feature) => write!(f, "Feature not implemented: {}", feature),
             Self::ProcessingError(msg) => write!(f, "Processing error: {}", msg),
+            Self::InvalidMapping(msg) => write!(f, "Invalid face mapping: {}", msg),
+            Self::UserCancelled => write!(f, "Operation cancelled by user"),
         }
     }
 }
@@ -123,4 +129,33 @@ pub struct AlignedFace {
     /// Form: [[a, -b, tx], [b, a, ty]] where a = scale*cos(theta), b = scale*sin(theta)
     /// This is the forward transform (original -> aligned)
     pub transform: ndarray::Array2<f32>,
+}
+
+/// Face crop information for multi-face selection
+///
+/// Contains a detected face and the path where its cropped image was saved.
+/// Used during interactive face selection to let users visually identify faces.
+#[derive(Debug, Clone)]
+pub struct FaceCropInfo {
+    /// The detected face with bbox and landmarks
+    pub face: DetectedFace,
+
+    /// Path to saved crop image (e.g., "./tmp/face_crops/source/face_0.jpg")
+    pub crop_path: String,
+
+    /// Face index in detection results (0-based)
+    pub index: usize,
+}
+
+/// Mapping from source face to target face for multi-face swapping
+///
+/// Specifies which source face should be swapped onto which target face.
+/// Indices correspond to detection order (sorted by score, descending).
+#[derive(Debug, Clone)]
+pub struct FaceMapping {
+    /// Index of source face (0-based)
+    pub source_idx: usize,
+
+    /// Index of target face (0-based)
+    pub target_idx: usize,
 }
