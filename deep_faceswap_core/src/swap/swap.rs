@@ -5,13 +5,174 @@ use crate::detection::FaceDetector;
 use crate::enhancer::FaceEnhancer;
 use crate::landmark::LandmarkDetector;
 use crate::mouth_mask;
+use crate::multi_face;
 use crate::recognition::FaceRecognizer;
 use crate::swapper::FaceSwapper;
-use crate::types::{FaceSwapError, Result};
+use crate::types::{DetectedFace, FaceSwapError, Result};
 use crate::utils::image as img_io;
 use crate::utils::rgb;
 use crate::verbose::{EVENT_ALIGN_FACE, EVENT_COMPLETE, EVENT_FACE_DETECTED, EVENT_PASTE_BACK};
 use crate::{log_additional, log_main};
+use ndarray::Array3;
+
+/// Swap a single source face into a single target face
+///
+/// # Arguments
+/// * `target_image` - Mutable target image (HWC, RGB, u8)
+/// * `target_face` - Detected face in target image
+/// * `source_image` - Source image for face alignment (HWC, RGB, u8)
+/// * `source_embedding` - Pre-extracted source face embedding (512D)
+/// * `swapper` - Face swapper model
+/// * `enhancer` - Optional face enhancer model
+/// * `landmark_detector` - Optional 106-point landmark detector
+/// * `use_mouth_mask` - Whether to apply mouth mask
+///
+/// # Returns
+/// Modified target_image with swapped face
+fn swap_single_pair(
+    target_image: &mut Array3<u8>,
+    target_face: &DetectedFace,
+    _source_image: &Array3<u8>,
+    source_embedding: &[f32],
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    use_mouth_mask: bool,
+) -> Result<()> {
+    // Detect 106 landmarks on target face before swap (needed for mouth mask)
+    let mouth_mask_data = if use_mouth_mask {
+        if let Some(ref mut lm_detector) = landmark_detector {
+            log_additional!("mouth_mask", "Detecting 106 landmarks on target face");
+            let landmarks = lm_detector.detect(target_image, target_face)?;
+            let (frame_h, frame_w, _) = target_image.dim();
+            let data = mouth_mask::create_mouth_mask(target_image, &landmarks, frame_h, frame_w)?;
+            Some(data)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
+    let target_aligned = alignment::align_face(target_image, target_face, 128)?;
+
+    let swapped_face = swapper.swap(&target_aligned.aligned_image, source_embedding)?;
+
+    log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
+    let mut result = alignment::paste_back(
+        target_image,
+        &swapped_face,
+        &target_aligned.transform,
+        &target_aligned.face.bbox,
+        128,
+    )?;
+
+    // Apply mouth mask after swap but before enhancement
+    if let Some(ref data) = mouth_mask_data {
+        log_additional!("mouth_mask", "Applying mouth mask");
+        mouth_mask::apply_mouth_mask(&mut result, data);
+    }
+
+    // Enhance face if enhancer is provided
+    if let Some(ref mut enh) = enhancer {
+        log_additional!("enhance_face", "Enhancing face at original resolution");
+
+        // Align target face from result image to 512x512 for enhancement
+        let target_aligned_512 = alignment::align_face(&result, target_face, 512)?;
+
+        // Enhance the 512x512 aligned face
+        let enhanced_512 = enh.enhance(&target_aligned_512.aligned_image)?;
+
+        // Paste enhanced face back into result
+        result = alignment::paste_back(
+            &result,
+            &enhanced_512,
+            &target_aligned_512.transform,
+            &target_aligned_512.face.bbox,
+            512,
+        )?;
+    }
+
+    *target_image = result;
+    Ok(())
+}
+
+/// Swap multiple faces in target image based on interactive face mapping
+///
+/// # Arguments
+/// * `source_faces` - All detected faces in source image
+/// * `target_faces` - All detected faces in target image
+/// * `source_image` - Source image (HWC, RGB, u8)
+/// * `target_image` - Mutable target image (HWC, RGB, u8)
+/// * `recognizer` - Face recognizer for embedding extraction
+/// * `swapper` - Face swapper model
+/// * `enhancer` - Optional face enhancer model
+/// * `landmark_detector` - Optional 106-point landmark detector
+/// * `use_mouth_mask` - Whether to apply mouth mask
+///
+/// # Returns
+/// Modified target_image with all swapped faces
+fn swap_multiple_faces(
+    source_faces: &[DetectedFace],
+    target_faces: &[DetectedFace],
+    source_image: &Array3<u8>,
+    target_image: &mut Array3<u8>,
+    recognizer: &mut FaceRecognizer,
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    use_mouth_mask: bool,
+) -> Result<()> {
+    // Build face mappings via interactive prompts
+    let mappings = multi_face::build_face_mappings(
+        source_faces,
+        target_faces,
+        source_image,
+        target_image,
+    )?;
+
+    log_main!(
+        "multi_face",
+        "Processing face mappings",
+        count = mappings.len()
+    );
+
+    // Extract embeddings for all source faces upfront
+    let mut source_embeddings = Vec::new();
+    for (idx, face) in source_faces.iter().enumerate() {
+        log_additional!(EVENT_ALIGN_FACE, "Aligning source face", index = idx);
+        let source_aligned = alignment::align_face(source_image, face, 112)?;
+        let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
+        source_embeddings.push(embedding);
+    }
+
+    // Swap each mapped face
+    for mapping in &mappings {
+        log_main!(
+            "multi_face",
+            "Swapping face",
+            source_idx = mapping.source_idx,
+            target_idx = mapping.target_idx
+        );
+
+        let source_embedding = &source_embeddings[mapping.source_idx];
+        let target_face = &target_faces[mapping.target_idx];
+
+        swap_single_pair(
+            target_image,
+            target_face,
+            source_image,
+            source_embedding,
+            swapper,
+            enhancer,
+            landmark_detector,
+            use_mouth_mask,
+        )?;
+    }
+
+    Ok(())
+}
 
 /// Simple face swap between two images
 ///
@@ -81,105 +242,78 @@ pub fn swap_faces(
     if source_faces.is_empty() {
         return Err(FaceSwapError::NoFacesDetected);
     }
-    // Take the first face (highest confidence score)
-    let source_face = &source_faces[0];
-    if source_faces.len() > 1 {
-        log_main!(
-            EVENT_FACE_DETECTED,
-            "Multiple faces detected in source, using face with highest score",
-            count = source_faces.len(),
-            score = source_face.det_score
-        );
-    } else {
-        log_additional!(
-            EVENT_FACE_DETECTED,
-            "Found source face",
-            score = source_face.det_score
-        );
-    }
+    log_main!(
+        EVENT_FACE_DETECTED,
+        "Detected source faces",
+        count = source_faces.len()
+    );
 
     let target_faces = detector.detect(&target_array, 0.5, 0.4)?;
     if target_faces.is_empty() {
         return Err(FaceSwapError::NoFacesDetected);
     }
-    // Take the first face (highest confidence score)
-    let target_face = &target_faces[0];
-    if target_faces.len() > 1 {
+    log_main!(
+        EVENT_FACE_DETECTED,
+        "Detected target faces",
+        count = target_faces.len()
+    );
+
+    let mut result = target_array.clone();
+
+    // Branch: multi-face or single-face swap
+    if use_multi_face && (source_faces.len() > 1 || target_faces.len() > 1) {
         log_main!(
-            EVENT_FACE_DETECTED,
-            "Multiple faces detected in target, using face with highest score",
-            count = target_faces.len(),
-            score = target_face.det_score
+            "multi_face",
+            "Multi-face mode enabled",
+            source_count = source_faces.len(),
+            target_count = target_faces.len()
         );
+
+        swap_multiple_faces(
+            &source_faces,
+            &target_faces,
+            &source_array,
+            &mut result,
+            &mut recognizer,
+            &mut swapper,
+            &mut enhancer,
+            &mut landmark_detector,
+            use_mouth_mask,
+        )?;
     } else {
-        log_additional!(
-            EVENT_FACE_DETECTED,
-            "Found target face",
-            score = target_face.det_score
-        );
-    }
+        // Single face swap (use first face from each)
+        let source_face = &source_faces[0];
+        let target_face = &target_faces[0];
 
-    // Detect 106 landmarks on target face before swap (needed for mouth mask)
-    let mouth_mask_data = if let Some(ref mut lm_detector) = landmark_detector {
-        log_additional!("mouth_mask", "Detecting 106 landmarks on target face");
-        let landmarks = lm_detector.detect(&target_array, target_face)?;
-        let (frame_h, frame_w, _) = target_array.dim();
-        let data = mouth_mask::create_mouth_mask(&target_array, &landmarks, frame_h, frame_w)?;
-        Some(data)
-    } else {
-        None
-    };
+        if source_faces.len() > 1 {
+            log_main!(
+                EVENT_FACE_DETECTED,
+                "Multiple source faces, using highest score",
+                score = source_face.det_score
+            );
+        }
 
-    log_additional!(EVENT_ALIGN_FACE, "Aligning source face");
-    let source_aligned = alignment::align_face(&source_array, source_face, 112)?;
-    let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
+        if target_faces.len() > 1 {
+            log_main!(
+                EVENT_FACE_DETECTED,
+                "Multiple target faces, using highest score",
+                score = target_face.det_score
+            );
+        }
 
-    log_additional!(EVENT_ALIGN_FACE, "Aligning target face");
-    let target_aligned = alignment::align_face(&target_array, target_face, 128)?;
+        log_additional!(EVENT_ALIGN_FACE, "Aligning source face");
+        let source_aligned = alignment::align_face(&source_array, source_face, 112)?;
+        let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
 
-    let swapped_face = swapper.swap(&target_aligned.aligned_image, &source_embedding)?;
-
-    log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
-    let mut result = alignment::paste_back(
-        &target_array,
-        &swapped_face,
-        &target_aligned.transform,
-        &target_aligned.face.bbox,
-        128,
-    )?;
-
-    // Apply mouth mask after swap but before enhancement
-    if let Some(ref data) = mouth_mask_data {
-        log_additional!("mouth_mask", "Applying mouth mask");
-        mouth_mask::apply_mouth_mask(&mut result, data);
-    }
-
-    // Enhance face if enhancer is provided
-    // Extract face region at original resolution and enhance
-    if let Some(ref mut enhancer) = enhancer {
-        log_additional!("enhance_face", "Enhancing face at original resolution");
-
-        // Align target face from result image to 512x512 for enhancement
-        let target_aligned_512 = alignment::align_face(&result, target_face, 512)?;
-
-        // @debug: Convert aligned face to RGB image for debug
-        // let aligned_512_rgb = rgb::array_to_rgb(&target_aligned_512.aligned_image)?;
-        // img_io::save_image(&aligned_512_rgb, "/tmp/debug_before_gfpgan.jpg")?;
-
-        // Enhance the 512x512 aligned face
-        let enhanced_512 = enhancer.enhance(&target_aligned_512.aligned_image)?;
-
-        // @debug: Convert back to RGB for debug
-        // let enhanced_img_512 = rgb::array_to_rgb(&enhanced_512)?;
-        // img_io::save_image(&enhanced_img_512, "/tmp/debug_after_gfpgan.jpg")?;
-
-        // Paste enhanced face back into result
-        result = alignment::paste_back(
-            &result,
-            &enhanced_512,
-            &target_aligned_512.transform,
-            &target_aligned_512.face.bbox,
-            512,
+        swap_single_pair(
+            &mut result,
+            target_face,
+            &source_array,
+            &source_embedding,
+            &mut swapper,
+            &mut enhancer,
+            &mut landmark_detector,
+            use_mouth_mask,
         )?;
     }
 
