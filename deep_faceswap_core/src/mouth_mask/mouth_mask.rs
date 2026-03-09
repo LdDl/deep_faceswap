@@ -72,10 +72,8 @@ pub fn create_mouth_mask(
     frame_w: usize,
 ) -> Result<MouthMaskData> {
     // Extract mouth polygon landmarks
-    let mut mouth_points: Vec<[f32; 2]> = LOWER_LIP_ORDER
-        .iter()
-        .map(|&idx| landmarks[idx])
-        .collect();
+    let mut mouth_points: Vec<[f32; 2]> =
+        LOWER_LIP_ORDER.iter().map(|&idx| landmarks[idx]).collect();
 
     // Calculate polygon center
     let center_x: f32 = mouth_points.iter().map(|p| p[0]).sum::<f32>() / mouth_points.len() as f32;
@@ -133,12 +131,7 @@ pub fn create_mouth_mask(
 
     // Create mask ROI with filled polygon
     let mut mask_roi = Array2::<f32>::zeros((roi_h, roi_w));
-    fill_polygon_on_mask(
-        &mut mask_roi,
-        &mouth_points,
-        min_x as f32,
-        min_y as f32,
-    );
+    fill_polygon_on_mask(&mut mask_roi, &mouth_points, min_x as f32, min_y as f32);
 
     // Apply Gaussian blur to soften edges
     let mask_roi = gaussian_blur_2d(&mask_roi, MASK_BLUR_KERNEL);
@@ -149,9 +142,7 @@ pub fn create_mouth_mask(
         .assign(&mask_roi);
 
     // Extract mouth cutout from original image
-    let mouth_cutout = image
-        .slice(s![min_y..max_y, min_x..max_x, ..])
-        .to_owned();
+    let mouth_cutout = image.slice(s![min_y..max_y, min_x..max_x, ..]).to_owned();
 
     Ok(MouthMaskData {
         mask,
@@ -177,9 +168,7 @@ pub fn apply_mouth_mask(frame: &mut Array3<u8>, mouth_data: &MouthMaskData) {
     }
 
     // Extract current ROI from the swapped frame
-    let roi = frame
-        .slice(s![min_y..max_y, min_x..max_x, ..])
-        .to_owned();
+    let roi = frame.slice(s![min_y..max_y, min_x..max_x, ..]).to_owned();
 
     // Color-correct the original mouth cutout to match swapped face colors
     let color_corrected = color_transfer_lab(&mouth_data.mouth_cutout, &roi);
@@ -240,12 +229,7 @@ pub fn apply_mouth_mask(frame: &mut Array3<u8>, mouth_data: &MouthMaskData) {
 // Polygon points are in original image coordinates,
 // offset_x/offset_y are subtracted to convert to ROI-local coordinates.
 // @todo: may be make public and more optimizations?
-fn fill_polygon_on_mask(
-    mask: &mut Array2<f32>,
-    points: &[[f32; 2]],
-    offset_x: f32,
-    offset_y: f32,
-) {
+fn fill_polygon_on_mask(mask: &mut Array2<f32>, points: &[[f32; 2]], offset_x: f32, offset_y: f32) {
     let (h, w) = (mask.nrows(), mask.ncols());
     let n = points.len();
     if n < 3 {
@@ -259,11 +243,7 @@ fn fill_polygon_on_mask(
         .collect();
 
     // Find Y range
-    let min_y = local
-        .iter()
-        .map(|p| p.1)
-        .fold(f32::MAX, f32::min)
-        .max(0.0) as usize;
+    let min_y = local.iter().map(|p| p.1).fold(f32::MAX, f32::min).max(0.0) as usize;
     let max_y = local
         .iter()
         .map(|p| p.1)

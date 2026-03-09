@@ -95,8 +95,16 @@ fn main() -> Result<()> {
             landmark_model,
             multi_face,
         } => {
-            let enhancer_model = if enhance { Some(enhancer.as_str()) } else { None };
-            let landmark_model = if mouth_mask { Some(landmark_model.as_str()) } else { None };
+            let enhancer_model = if enhance {
+                Some(enhancer.as_str())
+            } else {
+                None
+            };
+            let landmark_model = if mouth_mask {
+                Some(landmark_model.as_str())
+            } else {
+                None
+            };
             deep_faceswap_core::swap_faces(
                 &source,
                 &target,

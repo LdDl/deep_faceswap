@@ -1,7 +1,7 @@
 //! Color space conversion and color transfer utilities
 //!
 //! IEC 61966-2-1, CIE 1976.
-//! Provides RGB <-> CIE LAB conversion and LAB-based color transfer. 
+//! Provides RGB <-> CIE LAB conversion and LAB-based color transfer.
 //! Used in mouth mask blending to match the original mouth colors
 //! with the swapped face lighting.
 
@@ -346,7 +346,15 @@ mod tests {
                     && (g as i16 - g2 as i16).abs() <= 1
                     && (b as i16 - b2 as i16).abs() <= 1,
                 "RGB ({},{},{}) -> LAB ({:.1},{:.1},{:.1}) -> RGB ({},{},{})",
-                r, g, b, l, a, bv, r2, g2, b2,
+                r,
+                g,
+                b,
+                l,
+                a,
+                bv,
+                r2,
+                g2,
+                b2,
             );
         }
     }
@@ -363,7 +371,11 @@ mod tests {
                     assert!(
                         (img[[y, x, c]] as i16 - result[[y, x, c]] as i16).abs() <= 2,
                         "Pixel ({},{},{}) differs: {} vs {}",
-                        y, x, c, img[[y, x, c]], result[[y, x, c]],
+                        y,
+                        x,
+                        c,
+                        img[[y, x, c]],
+                        result[[y, x, c]],
                     );
                 }
             }

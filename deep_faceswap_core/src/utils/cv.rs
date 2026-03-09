@@ -120,7 +120,10 @@ pub fn apply_nms(detections: &[DetectedFace], iou_threshold: f32) -> Vec<Detecte
     note = "Use erode_mask_optimized instead for 5x better performance (especially in debug builds)"
 )]
 pub fn erode_mask(mask: &Array2<u8>, kernel_size: usize) -> Array2<u8> {
-    assert!(kernel_size >= 3 && kernel_size % 2 == 1, "Kernel size must be odd and >= 3");
+    assert!(
+        kernel_size >= 3 && kernel_size % 2 == 1,
+        "Kernel size must be odd and >= 3"
+    );
 
     let (h, w) = (mask.nrows(), mask.ncols());
     let mut output = Array2::<u8>::zeros((h, w));
@@ -194,7 +197,10 @@ pub fn erode_mask(mask: &Array2<u8>, kernel_size: usize) -> Array2<u8> {
 /// assert_eq!(eroded[[2, 2]], 0);
 /// ```
 pub fn erode_mask_optimized(mask: &Array2<u8>, kernel_size: usize) -> Array2<u8> {
-    assert!(kernel_size >= 3 && kernel_size % 2 == 1, "Kernel size must be odd and >= 3");
+    assert!(
+        kernel_size >= 3 && kernel_size % 2 == 1,
+        "Kernel size must be odd and >= 3"
+    );
 
     let (h, w) = (mask.nrows(), mask.ncols());
     let half = (kernel_size / 2) as isize;
@@ -440,7 +446,11 @@ mod tests {
         let eroded = erode_mask(&mask, 3);
 
         assert_eq!(eroded[[5, 5]], 255, "Center should remain white");
-        assert_eq!(eroded[[0, 0]], 255, "Corner remains white (border replicate)");
+        assert_eq!(
+            eroded[[0, 0]],
+            255,
+            "Corner remains white (border replicate)"
+        );
         assert_eq!(eroded[[0, 5]], 255, "Edge remains white (border replicate)");
     }
 
@@ -488,9 +498,13 @@ mod tests {
         for y in 0..10 {
             for x in 0..10 {
                 assert_eq!(
-                    original[[y, x]], optimized[[y, x]],
+                    original[[y, x]],
+                    optimized[[y, x]],
                     "Mismatch at ({}, {}): {} vs {}",
-                    y, x, original[[y, x]], optimized[[y, x]]
+                    y,
+                    x,
+                    original[[y, x]],
+                    optimized[[y, x]]
                 );
             }
         }
@@ -511,9 +525,13 @@ mod tests {
         for y in 0..100 {
             for x in 0..100 {
                 assert_eq!(
-                    original[[y, x]], optimized[[y, x]],
+                    original[[y, x]],
+                    optimized[[y, x]],
                     "Mismatch at ({}, {}): {} vs {}",
-                    y, x, original[[y, x]], optimized[[y, x]]
+                    y,
+                    x,
+                    original[[y, x]],
+                    optimized[[y, x]]
                 );
             }
         }
@@ -538,9 +556,13 @@ mod tests {
         for y in 0..50 {
             for x in 0..50 {
                 assert_eq!(
-                    original[[y, x]], optimized[[y, x]],
+                    original[[y, x]],
+                    optimized[[y, x]],
                     "Mismatch at ({}, {}): {} vs {}",
-                    y, x, original[[y, x]], optimized[[y, x]]
+                    y,
+                    x,
+                    original[[y, x]],
+                    optimized[[y, x]]
                 );
             }
         }

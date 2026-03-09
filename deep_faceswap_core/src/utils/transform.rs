@@ -194,7 +194,7 @@ pub fn warp_affine(
 /// Warps a mask using an affine transformation matrix with bilinear interpolation.
 /// This is used to transform face masks back to the original image coordinates.
 /// https://docs.opencv.org/4.x/da/d54/group__imgproc__transform.html#ga0203d9ee5fcd28d40dbc4a1ea4451983
-/// 
+///
 /// NOTE: Uses FORWARD mapping like cv2.warpAffine!
 ///
 /// # Arguments
@@ -229,9 +229,11 @@ pub fn warp_affine_mask(
             let dst_x = a * src_x as f32 + b * src_y as f32 + c;
             let dst_y = d * src_x as f32 + e * src_y as f32 + f;
 
-
-            if dst_x >= 0.0 && dst_x < (output_w - 1) as f32 && dst_y >= 0.0 && dst_y < (output_h - 1) as f32 {
-
+            if dst_x >= 0.0
+                && dst_x < (output_w - 1) as f32
+                && dst_y >= 0.0
+                && dst_y < (output_h - 1) as f32
+            {
                 let x0 = dst_x.floor() as usize;
                 let y0 = dst_y.floor() as usize;
                 let x1 = (x0 + 1).min(output_w - 1);
@@ -243,10 +245,14 @@ pub fn warp_affine_mask(
                 let value = mask[[src_y, src_x]] as f32;
 
                 // Bilinear splatting
-                result[[y0, x0]] = (result[[y0, x0]] as f32 + value * (1.0 - dx) * (1.0 - dy)).clamp(0.0, 255.0) as u8;
-                result[[y0, x1]] = (result[[y0, x1]] as f32 + value * dx * (1.0 - dy)).clamp(0.0, 255.0) as u8;
-                result[[y1, x0]] = (result[[y1, x0]] as f32 + value * (1.0 - dx) * dy).clamp(0.0, 255.0) as u8;
-                result[[y1, x1]] = (result[[y1, x1]] as f32 + value * dx * dy).clamp(0.0, 255.0) as u8;
+                result[[y0, x0]] = (result[[y0, x0]] as f32 + value * (1.0 - dx) * (1.0 - dy))
+                    .clamp(0.0, 255.0) as u8;
+                result[[y0, x1]] =
+                    (result[[y0, x1]] as f32 + value * dx * (1.0 - dy)).clamp(0.0, 255.0) as u8;
+                result[[y1, x0]] =
+                    (result[[y1, x0]] as f32 + value * (1.0 - dx) * dy).clamp(0.0, 255.0) as u8;
+                result[[y1, x1]] =
+                    (result[[y1, x1]] as f32 + value * dx * dy).clamp(0.0, 255.0) as u8;
             }
         }
     }
@@ -300,16 +306,10 @@ mod tests {
 
         assert!((transform[[0, 0]] - 1.0).abs() < EPS, "a should be 1.0");
         assert!((transform[[0, 1]] - 0.0).abs() < EPS, "b should be 0.0");
-        assert!(
-            (transform[[0, 2]] - 20.0).abs() < EPS,
-            "tx should be 20.0"
-        );
+        assert!((transform[[0, 2]] - 20.0).abs() < EPS, "tx should be 20.0");
         assert!((transform[[1, 0]] - 0.0).abs() < EPS, "b should be 0.0");
         assert!((transform[[1, 1]] - 1.0).abs() < EPS, "a should be 1.0");
-        assert!(
-            (transform[[1, 2]] - 30.0).abs() < EPS,
-            "ty should be 30.0"
-        );
+        assert!((transform[[1, 2]] - 30.0).abs() < EPS, "ty should be 30.0");
     }
 
     #[test]
@@ -394,10 +394,7 @@ mod tests {
         ];
 
         let result = estimate_affine_transform(&degenerate, &target);
-        assert!(
-            result.is_err(),
-            "Degenerate points should return error"
-        );
+        assert!(result.is_err(), "Degenerate points should return error");
     }
 
     #[test]
@@ -428,7 +425,11 @@ mod tests {
         let identity = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]).unwrap();
 
         let warped = warp_affine(&img, &identity, 15).unwrap();
-        assert_eq!(warped.shape(), &[15, 15, 3], "Output should match requested size");
+        assert_eq!(
+            warped.shape(),
+            &[15, 15, 3],
+            "Output should match requested size"
+        );
     }
 
     #[test]
@@ -445,7 +446,11 @@ mod tests {
     #[test]
     fn test_warp_affine_mask_identity() {
         let mask = Array2::from_shape_fn((10, 10), |(y, x)| {
-            if y >= 3 && y < 7 && x >= 3 && x < 7 { 255u8 } else { 0u8 }
+            if y >= 3 && y < 7 && x >= 3 && x < 7 {
+                255u8
+            } else {
+                0u8
+            }
         });
 
         let identity = Array2::from_shape_vec((2, 3), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0]).unwrap();
@@ -454,7 +459,8 @@ mod tests {
         for y in 0..10 {
             for x in 0..10 {
                 assert_eq!(
-                    warped[[y, x]], mask[[y, x]],
+                    warped[[y, x]],
+                    mask[[y, x]],
                     "Identity should preserve mask"
                 );
             }
@@ -473,6 +479,9 @@ mod tests {
         let scale = Array2::from_shape_vec((2, 3), vec![0.5, 0.0, 0.0, 0.0, 0.5, 0.0]).unwrap();
         let warped = warp_affine_mask(&mask, &scale, 10, 10).unwrap();
 
-        assert!(warped[[5, 5]] > 0, "Center of scaled mask should have value");
+        assert!(
+            warped[[5, 5]] > 0,
+            "Center of scaled mask should have value"
+        );
     }
 }

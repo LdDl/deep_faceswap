@@ -136,4 +136,3 @@ impl FaceRecognizer {
         Ok(embedding_vec)
     }
 }
-

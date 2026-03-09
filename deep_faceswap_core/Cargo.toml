@@ -28,3 +28,8 @@ serde_json.workspace = true
 
 [dev-dependencies]
 approx = "0.5"  # For float comparisons in tests
+criterion = "0.5"
+
+[[bench]]
+name = "optimization_bench"
+harness = false

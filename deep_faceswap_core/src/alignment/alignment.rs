@@ -6,7 +6,7 @@
 
 use crate::types::{AlignedFace, DetectedFace, FaceSwapError, Result};
 use crate::utils::blur::gaussian_blur_2d;
-use crate::utils::cv::erode_mask;
+use crate::utils::cv::erode_mask_optimized;
 use crate::utils::transform::{estimate_affine_transform, invert_affine_transform, warp_affine};
 use ndarray::{Array2, Array3, Array4};
 
@@ -120,12 +120,15 @@ pub fn paste_back(
     let face_size_usize = face_size as usize;
 
     // Convert swapped face from normalized f32 to u8
-    let swapped_u8 =
-        Array3::from_shape_fn((face_size_usize, face_size_usize, 3), |(y, x, c)| {
-            (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
-        });
+    let swapped_u8 = Array3::from_shape_fn((face_size_usize, face_size_usize, 3), |(y, x, c)| {
+        (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
+    });
 
-    let (h, w, _) = (target_img.shape()[0], target_img.shape()[1], target_img.shape()[2]);
+    let (h, w, _) = (
+        target_img.shape()[0],
+        target_img.shape()[1],
+        target_img.shape()[2],
+    );
 
     // Create white mask in aligned face space
     let white_mask = Array2::from_elem((face_size_usize, face_size_usize), 255.0f32);
@@ -146,8 +149,11 @@ pub fn paste_back(
             let src_x = a * x as f32 + b * y as f32 + c;
             let src_y = d * x as f32 + e * y as f32 + f;
 
-            if src_x >= 0.0 && src_x < (face_size - 1) as f32
-                && src_y >= 0.0 && src_y < (face_size - 1) as f32 {
+            if src_x >= 0.0
+                && src_x < (face_size - 1) as f32
+                && src_y >= 0.0
+                && src_y < (face_size - 1) as f32
+            {
                 let x0 = src_x.floor() as usize;
                 let y0 = src_y.floor() as usize;
                 let x1 = (x0 + 1).min(face_size_usize - 1);
@@ -192,8 +198,11 @@ pub fn paste_back(
             let src_x = a * x as f32 + b * y as f32 + c;
             let src_y = d * x as f32 + e * y as f32 + f;
 
-            if src_x >= 0.0 && src_x < (face_size - 1) as f32
-                && src_y >= 0.0 && src_y < (face_size - 1) as f32 {
+            if src_x >= 0.0
+                && src_x < (face_size - 1) as f32
+                && src_y >= 0.0
+                && src_y < (face_size - 1) as f32
+            {
                 let x0 = src_x.floor() as usize;
                 let y0 = src_y.floor() as usize;
                 let x1 = (x0 + 1).min(face_size_usize - 1);
@@ -218,7 +227,6 @@ pub fn paste_back(
         }
     }
 
-
     // Calculate mask size for erosion kernel
     let mask_h_inds: Vec<usize> = (0..h)
         .filter(|&y| (0..w).any(|x| warped_mask[[y, x]] == 255))
@@ -240,13 +248,16 @@ pub fn paste_back(
 
     let mask_size = ((mask_h * mask_w) as f32).sqrt() as usize;
 
-
     // Erosion kernel size: mask_size // 10, minimum 10
     let erosion_k = (mask_size / 10).max(10);
-    let erosion_k = if erosion_k % 2 == 0 { erosion_k + 1 } else { erosion_k };
+    let erosion_k = if erosion_k % 2 == 0 {
+        erosion_k + 1
+    } else {
+        erosion_k
+    };
 
     // Apply erosion to shrink mask inward
-    let eroded_mask = erode_mask(&warped_mask, erosion_k);
+    let eroded_mask = erode_mask_optimized(&warped_mask, erosion_k);
 
     // Apply Gaussian blur
     // Kernel size: should be odd and positive
