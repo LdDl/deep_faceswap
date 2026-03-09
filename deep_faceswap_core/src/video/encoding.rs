@@ -12,11 +12,7 @@ use crate::types::{FaceSwapError, Result};
 ///
 /// # Returns
 /// Ok(()) if encoding succeeds
-pub fn encode_video(
-    frames_dir: &str,
-    output_path: &str,
-    original_video_path: &str,
-) -> Result<()> {
+pub fn encode_video(frames_dir: &str, output_path: &str, original_video_path: &str) -> Result<()> {
     // Get FPS and audio stream info from original video
     let (fps, has_audio) = get_video_metadata(original_video_path)?;
 
@@ -42,8 +38,9 @@ pub fn encode_video(
 
 /// Get video metadata (FPS and audio presence)
 fn get_video_metadata(video_path: &str) -> Result<(f64, bool)> {
-    ffmpeg_next::init()
-        .map_err(|e| FaceSwapError::ProcessingError(format!("Failed to initialize ffmpeg: {}", e)))?;
+    ffmpeg_next::init().map_err(|e| {
+        FaceSwapError::ProcessingError(format!("Failed to initialize ffmpeg: {}", e))
+    })?;
 
     let input_ctx = ffmpeg_next::format::input(&video_path)
         .map_err(|e| FaceSwapError::ProcessingError(format!("Failed to open video: {}", e)))?;
@@ -79,7 +76,7 @@ fn encode_frames_to_video(frames_dir: &str, output_path: &str, fps: f64) -> Resu
     // medium - Encoding preset
     // crf 23 - Quality (0-51, lower is better)
     let output = std::process::Command::new("ffmpeg")
-        .arg("-y") 
+        .arg("-y")
         .arg("-framerate")
         .arg(fps.to_string())
         .arg("-i")
@@ -94,9 +91,7 @@ fn encode_frames_to_video(frames_dir: &str, output_path: &str, fps: f64) -> Resu
         .arg("23")
         .arg(output_path)
         .output()
-        .map_err(|e| {
-            FaceSwapError::ProcessingError(format!("Failed to execute ffmpeg: {}", e))
-        })?;
+        .map_err(|e| FaceSwapError::ProcessingError(format!("Failed to execute ffmpeg: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -124,7 +119,7 @@ fn copy_audio_stream(original_video_path: &str, output_video_path: &str) -> Resu
     // -map 1:a:0 - Take audio from second input
     // -shortest - Match shortest stream duration to avoid extra silence
     let output = std::process::Command::new("ffmpeg")
-        .arg("-y") // Overwrite output file
+        .arg("-y")
         .arg("-i")
         // Video without audio
         .arg(output_video_path)
