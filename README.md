@@ -175,7 +175,25 @@ deep-faceswap-cli swap \
   --multi-face
 ```
 
-When multiple faces are detected in source or target images, the CLI provides interactive face selection:
+#### Multiple source images
+
+You can provide multiple source images as a comma-separated list. All faces from all source images will be aggregated and available for mapping:
+
+```bash
+deep-faceswap-cli swap \
+  --source img1.jpg,img2.jpg,img3.jpg \
+  --target group_photo.jpg \
+  --output output.jpg \
+  --multi-face
+```
+
+Face crops will be named with the source filename prefix (e.g., `img1_face_0.jpg`, `img2_face_0.jpg`) to help identify which image each face came from.
+
+If a source image contains no faces, a warning is logged and processing continues with the remaining images.
+
+#### Interactive face selection
+
+When multiple faces are detected, the CLI provides interactive face selection:
 
 - **1:1 case** (1 source, 1 target): No prompt, swaps automatically
 - **1:N case** (1 source, N targets): Prompts to select which target faces to swap (enter indices like `0,1` or `all`)

@@ -8,7 +8,7 @@ use crate::mouth_mask;
 use crate::multi_face;
 use crate::recognition::FaceRecognizer;
 use crate::swapper::FaceSwapper;
-use crate::types::{DetectedFace, FaceSwapError, Result};
+use crate::types::{DetectedFace, FaceSwapError, Result, SourceFaceInfo};
 use crate::utils::image as img_io;
 use crate::utils::rgb;
 use crate::verbose::{EVENT_ALIGN_FACE, EVENT_COMPLETE, EVENT_FACE_DETECTED, EVENT_PASTE_BACK};
@@ -114,9 +114,9 @@ fn swap_single_pair(
 /// # Returns
 /// Modified target_image with all swapped faces
 fn swap_multiple_faces(
-    source_faces: &[DetectedFace],
+    source_face_infos: &[SourceFaceInfo],
     target_faces: &[DetectedFace],
-    source_image: &Array3<u8>,
+    source_images: &[Array3<u8>],
     target_image: &mut Array3<u8>,
     recognizer: &mut FaceRecognizer,
     swapper: &mut FaceSwapper,
@@ -126,9 +126,9 @@ fn swap_multiple_faces(
 ) -> Result<()> {
     // Build face mappings via interactive prompts
     let mappings = multi_face::build_face_mappings(
-        source_faces,
+        source_face_infos,
         target_faces,
-        source_image,
+        source_images,
         target_image,
     )?;
 
@@ -140,9 +140,14 @@ fn swap_multiple_faces(
 
     // Extract embeddings for all source faces upfront
     let mut source_embeddings = Vec::new();
-    for (idx, face) in source_faces.iter().enumerate() {
-        log_additional!(EVENT_ALIGN_FACE, "Aligning source face", index = idx);
-        let source_aligned = alignment::align_face(source_image, face, 112)?;
+    for info in source_face_infos.iter() {
+        log_additional!(
+            EVENT_ALIGN_FACE,
+            "Aligning source face",
+            filename = &info.source_filename
+        );
+        let source_img = &source_images[info.source_image_index];
+        let source_aligned = alignment::align_face(source_img, &info.face, 112)?;
         let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
         source_embeddings.push(embedding);
     }
@@ -156,13 +161,15 @@ fn swap_multiple_faces(
             target_idx = mapping.target_idx
         );
 
+        let source_info = &source_face_infos[mapping.source_idx];
+        let source_img = &source_images[source_info.source_image_index];
         let source_embedding = &source_embeddings[mapping.source_idx];
         let target_face = &target_faces[mapping.target_idx];
 
         swap_single_pair(
             target_image,
             target_face,
-            source_image,
+            source_img,
             source_embedding,
             swapper,
             enhancer,
@@ -230,23 +237,59 @@ pub fn swap_faces(
         None
     };
 
-    let source_img = img_io::load_image(source_path)?;
-    let source_rgb = img_io::to_rgb8(&source_img);
-    let source_array = rgb::rgb_to_array3(&source_rgb);
+    let source_paths: Vec<&str> = source_path.split(',').map(|s| s.trim()).collect();
+    let mut source_images: Vec<Array3<u8>> = Vec::new();
+    let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
+
+    for (img_idx, path) in source_paths.iter().enumerate() {
+        log_additional!("load_image", "Loading source image", path = path);
+
+        let img = img_io::load_image(path)?;
+        let rgb = img_io::to_rgb8(&img);
+        let array = rgb::rgb_to_array3(&rgb);
+
+        let faces = detector.detect(&array, 0.5, 0.4)?;
+
+        if faces.is_empty() {
+            log_main!("warn", "No faces detected in source image", path = path);
+        } else {
+            log_main!(
+                EVENT_FACE_DETECTED,
+                "Detected faces in source image",
+                path = path,
+                count = faces.len()
+            );
+
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path);
+
+            for face in faces {
+                all_source_faces.push(SourceFaceInfo {
+                    face,
+                    source_image_index: img_idx,
+                    source_filename: filename.to_string(),
+                });
+            }
+        }
+
+        source_images.push(array);
+    }
+
+    if all_source_faces.is_empty() {
+        return Err(FaceSwapError::NoFacesDetected);
+    }
+
+    log_main!(
+        EVENT_FACE_DETECTED,
+        "Total source faces across all images",
+        count = all_source_faces.len()
+    );
 
     let target_img = img_io::load_image(target_path)?;
     let target_rgb = img_io::to_rgb8(&target_img);
     let target_array = rgb::rgb_to_array3(&target_rgb);
-
-    let source_faces = detector.detect(&source_array, 0.5, 0.4)?;
-    if source_faces.is_empty() {
-        return Err(FaceSwapError::NoFacesDetected);
-    }
-    log_main!(
-        EVENT_FACE_DETECTED,
-        "Detected source faces",
-        count = source_faces.len()
-    );
 
     let target_faces = detector.detect(&target_array, 0.5, 0.4)?;
     if target_faces.is_empty() {
@@ -261,18 +304,18 @@ pub fn swap_faces(
     let mut result = target_array.clone();
 
     // Branch: multi-face or single-face swap
-    if use_multi_face && (source_faces.len() > 1 || target_faces.len() > 1) {
+    if use_multi_face && (all_source_faces.len() > 1 || target_faces.len() > 1) {
         log_main!(
             "multi_face",
             "Multi-face mode enabled",
-            source_count = source_faces.len(),
+            source_count = all_source_faces.len(),
             target_count = target_faces.len()
         );
 
         swap_multiple_faces(
-            &source_faces,
+            &all_source_faces,
             &target_faces,
-            &source_array,
+            &source_images,
             &mut result,
             &mut recognizer,
             &mut swapper,
@@ -282,13 +325,16 @@ pub fn swap_faces(
         )?;
     } else {
         // Single face swap (use first face from each)
-        let source_face = &source_faces[0];
+        let source_face_info = &all_source_faces[0];
+        let source_face = &source_face_info.face;
+        let source_image = &source_images[source_face_info.source_image_index];
         let target_face = &target_faces[0];
 
-        if source_faces.len() > 1 {
+        if all_source_faces.len() > 1 {
             log_main!(
                 EVENT_FACE_DETECTED,
-                "Multiple source faces, using highest score",
+                "Multiple source faces detected, using highest score",
+                filename = &source_face_info.source_filename,
                 score = source_face.det_score
             );
         }
@@ -302,13 +348,13 @@ pub fn swap_faces(
         }
 
         log_additional!(EVENT_ALIGN_FACE, "Aligning source face");
-        let source_aligned = alignment::align_face(&source_array, source_face, 112)?;
+        let source_aligned = alignment::align_face(source_image, source_face, 112)?;
         let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
 
         swap_single_pair(
             &mut result,
             target_face,
-            &source_array,
+            source_image,
             &source_embedding,
             &mut swapper,
             &mut enhancer,

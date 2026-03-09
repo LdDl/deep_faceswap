@@ -7,11 +7,26 @@ use std::io::{self, Write};
 fn print_face_crops(crops: &[FaceCropInfo], label: &str) {
     println!("\n{} faces saved to: ./tmp/face_crops/{}/", label, label.to_lowercase());
     for crop in crops {
-        println!("  [{}] {} (score: {:.2})",
-            crop.index,
-            crop.crop_path,
-            crop.face.det_score
-        );
+        let filename_part = std::path::Path::new(&crop.crop_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.split("_face_").next())
+            .unwrap_or("unknown");
+
+        if label.to_lowercase() == "source" && filename_part != "face" {
+            println!("  [{}] {} - {} (score: {:.2})",
+                crop.index,
+                filename_part,
+                crop.crop_path,
+                crop.face.det_score
+            );
+        } else {
+            println!("  [{}] {} (score: {:.2})",
+                crop.index,
+                crop.crop_path,
+                crop.face.det_score
+            );
+        }
     }
     println!();
 }

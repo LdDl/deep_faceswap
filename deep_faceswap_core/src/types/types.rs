@@ -159,3 +159,19 @@ pub struct FaceMapping {
     /// Index of target face (0-based)
     pub target_idx: usize,
 }
+
+/// Source face with metadata about its origin
+///
+/// When multiple source images are provided, this tracks which image
+/// each face came from, along with the face data itself.
+#[derive(Debug, Clone)]
+pub struct SourceFaceInfo {
+    /// The detected face with bbox and landmarks
+    pub face: DetectedFace,
+
+    /// Index of source image this face was detected in (0-based)
+    pub source_image_index: usize,
+
+    /// Filename of source image (e.g., "image1.jpg")
+    pub source_filename: String,
+}
