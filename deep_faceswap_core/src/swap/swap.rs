@@ -51,8 +51,7 @@ fn swap_single_pair(
         if let Some(ref mut lm_detector) = landmark_detector {
             log_additional!("mouth_mask", "Detecting 106 landmarks on target face");
             let landmarks = lm_detector.detect(target_image, target_face)?;
-            let (frame_h, frame_w, _) = target_image.dim();
-            let data = mouth_mask::create_mouth_mask(target_image, &landmarks, frame_h, frame_w)?;
+            let data = mouth_mask::create_mouth_mask(target_image, &landmarks)?;
             Some(data)
         } else {
             None
@@ -67,41 +66,38 @@ fn swap_single_pair(
     let swapped_face = swapper.swap(&target_aligned.aligned_image, source_embedding)?;
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
-    let mut result = alignment::paste_back(
+    alignment::paste_back_inplace(
         target_image,
         &swapped_face,
         &target_aligned.transform,
-        &target_aligned.face.bbox,
         128,
     )?;
 
     // Apply mouth mask after swap but before enhancement
     if let Some(ref data) = mouth_mask_data {
         log_additional!("mouth_mask", "Applying mouth mask");
-        mouth_mask::apply_mouth_mask(&mut result, data);
+        mouth_mask::apply_mouth_mask(target_image, data);
     }
 
     // Enhance face if enhancer is provided
     if let Some(ref mut enh) = enhancer {
         log_additional!("enhance_face", "Enhancing face at original resolution");
 
-        // Align target face from result image to 512x512 for enhancement
-        let target_aligned_512 = alignment::align_face(&result, target_face, 512)?;
+        // Align target face from current image to 512x512 for enhancement
+        let target_aligned_512 = alignment::align_face(target_image, target_face, 512)?;
 
         // Enhance the 512x512 aligned face
         let enhanced_512 = enh.enhance(&target_aligned_512.aligned_image)?;
 
-        // Paste enhanced face back into result
-        result = alignment::paste_back(
-            &result,
+        // Paste enhanced face back in-place
+        alignment::paste_back_inplace(
+            target_image,
             &enhanced_512,
             &target_aligned_512.transform,
-            &target_aligned_512.face.bbox,
             512,
         )?;
     }
 
-    *target_image = result;
     Ok(start_time.elapsed().as_secs_f64())
 }
 

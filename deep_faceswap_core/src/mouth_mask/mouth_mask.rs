@@ -52,7 +52,7 @@ const MASK_FEATHER_RATIO: usize = 12;
 const MAX_FEATHER: usize = 30;
 
 pub struct MouthMaskData {
-    /// Blurred mask for the mouth region (full frame size, float 0-1)
+    /// Blurred mask for the mouth region (ROI-sized, float values)
     pub mask: Array2<f32>,
     /// Mouth cutout from the original target image (HWC u8)
     pub mouth_cutout: Array3<u8>,
@@ -65,12 +65,13 @@ pub struct MouthMaskData {
 /// Create mouth mask from 106-point landmarks and the original target image.
 ///
 /// Returns the mask data needed to later apply the mouth blending after face swap.
+/// The mask is ROI-sized (only covers the mouth region, not the full frame).
 pub fn create_mouth_mask(
     image: &Array3<u8>,
     landmarks: &[[f32; 2]],
-    frame_h: usize,
-    frame_w: usize,
 ) -> Result<MouthMaskData> {
+    let (frame_h, frame_w, _) = image.dim();
+
     // Extract mouth polygon landmarks
     let mut mouth_points: Vec<[f32; 2]> =
         LOWER_LIP_ORDER.iter().map(|&idx| landmarks[idx]).collect();
@@ -136,16 +137,12 @@ pub fn create_mouth_mask(
     // Apply Gaussian blur to soften edges
     let mask_roi = gaussian_blur_2d(&mask_roi, MASK_BLUR_KERNEL);
 
-    // Place ROI into full-frame mask
-    let mut mask = Array2::<f32>::zeros((frame_h, frame_w));
-    mask.slice_mut(s![min_y..max_y, min_x..max_x])
-        .assign(&mask_roi);
-
     // Extract mouth cutout from original image
     let mouth_cutout = image.slice(s![min_y..max_y, min_x..max_x, ..]).to_owned();
 
+    // Return ROI-sized mask directly (no full-frame allocation)
     Ok(MouthMaskData {
-        mask,
+        mask: mask_roi,
         mouth_cutout,
         mouth_box: [min_x, min_y, max_x, max_y],
         polygon: mouth_points,
@@ -198,15 +195,10 @@ pub fn apply_mouth_mask(frame: &mut Array3<u8>, mouth_data: &MouthMaskData) {
         feathered_mask
     };
 
-    // Combine with the full face mask (from mouth_data.mask)
+    // Combine with the face mask (already ROI-sized from create_mouth_mask)
     // Take minimum to ensure mouth blending stays within face area
-    let face_mask_roi = mouth_data
-        .mask
-        .slice(s![min_y..max_y, min_x..max_x])
-        .to_owned();
-
     let combined_mask = Array2::from_shape_fn((roi_h, roi_w), |(y, x)| {
-        feathered_mask[[y, x]].min(face_mask_roi[[y, x]])
+        feathered_mask[[y, x]].min(mouth_data.mask[[y, x]])
     });
 
     // Alpha blend: result = mouth * mask + swapped * (1 - mask)

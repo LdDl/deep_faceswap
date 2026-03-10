@@ -117,18 +117,15 @@ pub fn array_to_rgb(array: &Array4<f32>) -> Result<RgbImage> {
 /// ```
 pub fn rgb_to_array3(img: &RgbImage) -> Array3<u8> {
     let (width, height) = img.dimensions();
-    let mut array = Array3::zeros((height as usize, width as usize, 3));
 
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = img.get_pixel(x, y);
-            array[[y as usize, x as usize, 0]] = pixel[0];
-            array[[y as usize, x as usize, 1]] = pixel[1];
-            array[[y as usize, x as usize, 2]] = pixel[2];
-        }
-    }
-
-    array
+    // RgbImage stores pixels as [R,G,B,R,G,B,...] in row-major order.
+    // Array3<u8> with shape (H,W,3) in standard layout has identical memory layout.
+    // Single bulk copy instead of H*W individual get_pixel calls.
+    Array3::from_shape_vec(
+        (height as usize, width as usize, 3),
+        img.as_raw().clone(),
+    )
+    .expect("RgbImage raw buffer size must match H*W*3")
 }
 
 /// Convert Array3<u8> (HWC format) to RgbImage
@@ -154,17 +151,15 @@ pub fn rgb_to_array3(img: &RgbImage) -> Array3<u8> {
 /// ```
 pub fn array3_to_rgb(array: &Array3<u8>) -> RgbImage {
     let (h, w, _) = (array.shape()[0], array.shape()[1], array.shape()[2]);
-    let mut img = RgbImage::new(w as u32, h as u32);
 
-    for y in 0..h {
-        for x in 0..w {
-            img.put_pixel(
-                x as u32,
-                y as u32,
-                image::Rgb([array[[y, x, 0]], array[[y, x, 1]], array[[y, x, 2]]]),
-            );
-        }
-    }
+    // If the array is contiguous in standard (row-major C) layout, use bulk copy.
+    // Otherwise fall back to element-by-element collection.
+    let data = if array.is_standard_layout() {
+        array.as_slice().unwrap().to_vec()
+    } else {
+        array.iter().cloned().collect()
+    };
 
-    img
+    RgbImage::from_raw(w as u32, h as u32, data)
+        .expect("Array3 data size must match W*H*3")
 }
