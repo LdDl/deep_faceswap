@@ -2,4 +2,4 @@
 
 pub mod kmeans;
 
-pub use kmeans::{find_nearest_centroid, kmeans_cluster, select_optimal_k};
+pub use kmeans::*;
