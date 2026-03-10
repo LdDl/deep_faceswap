@@ -18,6 +18,7 @@ ndarray.workspace = true
 ort.workspace = true
 
 # Utilities
+rand = "0.8"
 rayon.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

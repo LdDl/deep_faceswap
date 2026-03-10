@@ -1,6 +1,8 @@
 //! Interactive CLI prompts for face selection
 
-use crate::types::{FaceCropInfo, FaceMapping, FaceSwapError, Result};
+use crate::types::{
+    ClusterCropInfo, ClusterMapping, FaceCropInfo, FaceMapping, FaceSwapError, Result,
+};
 use std::io::{self, Write};
 
 /// Print face crop information to console
@@ -232,4 +234,168 @@ pub fn prompt_full_mapping(
     }
 
     Ok(mappings)
+}
+
+/// Print cluster crop information to console
+fn print_cluster_crops(crops: &[ClusterCropInfo]) {
+    println!("\nClusters found in video:");
+    for crop in crops {
+        println!(
+            "  [{}] {} (frames: {}, score: {:.2})",
+            crop.cluster_id, crop.crop_path, crop.frame_count, crop.face.det_score
+        );
+    }
+    println!();
+}
+
+/// Prompt user for source-to-cluster mapping
+///
+/// # Arguments
+/// * `source_crops` - Source face crops
+/// * `cluster_crops` - Cluster example face crops
+///
+/// # Returns
+/// Vector of ClusterMapping (source->cluster pairs)
+pub fn prompt_cluster_mapping(
+    source_crops: &[FaceCropInfo],
+    cluster_crops: &[ClusterCropInfo],
+) -> Result<Vec<ClusterMapping>> {
+    print_face_crops(source_crops, "Source");
+    print_cluster_crops(cluster_crops);
+
+    println!(
+        "{} source face(s) detected, {} cluster(s) found in video.",
+        source_crops.len(),
+        cluster_crops.len()
+    );
+    println!("Enter mappings in format 'S:C,S:C' (e.g., '0:0,1:1'):");
+    println!("Where S is source index and C is cluster ID.");
+    print!("> ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Err(FaceSwapError::UserCancelled);
+    }
+
+    let mut mappings = Vec::new();
+
+    for part in input.split(',') {
+        let part = part.trim();
+        let tokens: Vec<&str> = part.split(':').collect();
+
+        if tokens.len() != 2 {
+            return Err(FaceSwapError::InvalidMapping(format!(
+                "Invalid mapping format: '{}' (expected 'S:C')",
+                part
+            )));
+        }
+
+        let source_idx = tokens[0].trim().parse::<usize>().map_err(|_| {
+            FaceSwapError::InvalidMapping(format!("Invalid source index: '{}'", tokens[0]))
+        })?;
+
+        let cluster_id = tokens[1].trim().parse::<usize>().map_err(|_| {
+            FaceSwapError::InvalidMapping(format!("Invalid cluster ID: '{}'", tokens[1]))
+        })?;
+
+        if source_idx >= source_crops.len() {
+            return Err(FaceSwapError::InvalidMapping(format!(
+                "Source index {} out of range (max {})",
+                source_idx,
+                source_crops.len() - 1
+            )));
+        }
+
+        if cluster_id >= cluster_crops.len() {
+            return Err(FaceSwapError::InvalidMapping(format!(
+                "Cluster ID {} out of range (max {})",
+                cluster_id,
+                cluster_crops.len() - 1
+            )));
+        }
+
+        mappings.push(ClusterMapping {
+            source_idx,
+            cluster_id,
+        });
+    }
+
+    if mappings.is_empty() {
+        return Err(FaceSwapError::InvalidMapping(
+            "No valid mappings provided".to_string(),
+        ));
+    }
+
+    Ok(mappings)
+}
+
+/// Prompt user to select clusters (1:N case for video)
+///
+/// # Arguments
+/// * `source_crops` - Source face crops (should be length 1)
+/// * `cluster_crops` - Cluster example face crops
+///
+/// # Returns
+/// Vector of selected cluster IDs
+pub fn prompt_cluster_selection(
+    source_crops: &[FaceCropInfo],
+    cluster_crops: &[ClusterCropInfo],
+) -> Result<Vec<usize>> {
+    print_face_crops(source_crops, "Source");
+    print_cluster_crops(cluster_crops);
+
+    println!(
+        "One source face detected, {} cluster(s) found in video.",
+        cluster_crops.len()
+    );
+    println!("Enter cluster IDs to swap (comma-separated), or 'all' for all clusters:");
+    print!("> ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+
+    if input.is_empty() {
+        return Err(FaceSwapError::UserCancelled);
+    }
+
+    if input.eq_ignore_ascii_case("all") {
+        return Ok(cluster_crops.iter().map(|c| c.cluster_id).collect());
+    }
+
+    // Parse comma-separated cluster IDs
+    let mut cluster_ids = Vec::new();
+    for part in input.split(',') {
+        let part = part.trim();
+        match part.parse::<usize>() {
+            Ok(cluster_id) => {
+                if !cluster_crops.iter().any(|c| c.cluster_id == cluster_id) {
+                    return Err(FaceSwapError::InvalidMapping(format!(
+                        "Cluster ID {} not found in available clusters",
+                        cluster_id
+                    )));
+                }
+                cluster_ids.push(cluster_id);
+            }
+            Err(_) => {
+                return Err(FaceSwapError::InvalidMapping(format!(
+                    "Invalid cluster ID: '{}'",
+                    part
+                )));
+            }
+        }
+    }
+
+    if cluster_ids.is_empty() {
+        return Err(FaceSwapError::InvalidMapping(
+            "No valid cluster IDs provided".to_string(),
+        ));
+    }
+
+    Ok(cluster_ids)
 }

@@ -9,4 +9,4 @@
 pub mod prompt;
 pub mod selection;
 
-pub use selection::build_face_mappings;
+pub use selection::*;

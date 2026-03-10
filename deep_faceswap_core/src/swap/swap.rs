@@ -12,7 +12,9 @@ use crate::types::{DetectedFace, FaceSwapError, Result, SourceFaceInfo};
 use crate::utils::image as img_io;
 use crate::utils::rgb;
 use crate::verbose::{EVENT_ALIGN_FACE, EVENT_COMPLETE, EVENT_FACE_DETECTED, EVENT_PASTE_BACK};
-use crate::video::extract_frames;
+use crate::video::{
+    build_cluster_info, build_face_lookup, cluster_faces, extract_frames, scan_frames_for_faces,
+};
 use crate::{log_additional, log_main};
 use ndarray::Array3;
 use std::fs::create_dir_all;
@@ -496,26 +498,51 @@ pub fn swap_video(
 
     // Extract embeddings from source faces (cached for all frames)
     let action_start = Instant::now();
-    let source_face_info = &all_source_faces[0];
-    let source_face = &source_face_info.face;
-    let source_image = &source_images[source_face_info.source_image_index];
+    let mut source_embeddings = Vec::new();
 
-    if all_source_faces.len() > 1 {
+    if use_multi_face {
+        // Multi-face mode: extract embeddings for all source faces
+        for info in all_source_faces.iter() {
+            log_additional!(
+                EVENT_ALIGN_FACE,
+                "Aligning source face",
+                filename = &info.source_filename
+            );
+            let source_img = &source_images[info.source_image_index];
+            let source_aligned = alignment::align_face(source_img, &info.face, 112)?;
+            let embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
+            source_embeddings.push(embedding);
+        }
         log_main!(
-            EVENT_FACE_DETECTED,
-            "Multiple source faces detected, using highest score",
-            filename = &source_face_info.source_filename,
-            score = source_face.det_score
+            "extract_embeddings",
+            "Extracting source face embeddings complete",
+            count = source_embeddings.len(),
+            elapsed_s = action_start.elapsed().as_secs_f64()
+        );
+    } else {
+        // Single-face mode: extract embedding for first source face
+        let source_face_info = &all_source_faces[0];
+        let source_face = &source_face_info.face;
+        let source_image = &source_images[source_face_info.source_image_index];
+
+        if all_source_faces.len() > 1 {
+            log_main!(
+                EVENT_FACE_DETECTED,
+                "Multiple source faces detected, using highest score",
+                filename = &source_face_info.source_filename,
+                score = source_face.det_score
+            );
+        }
+
+        let source_aligned = alignment::align_face(source_image, source_face, 112)?;
+        let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
+        source_embeddings.push(source_embedding);
+        log_main!(
+            "extract_embeddings",
+            "Extracting source face embeddings complete",
+            elapsed_s = action_start.elapsed().as_secs_f64()
         );
     }
-
-    let source_aligned = alignment::align_face(source_image, source_face, 112)?;
-    let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
-    log_main!(
-        "extract_embeddings",
-        "Extracting source face embeddings complete",
-        elapsed_s = action_start.elapsed().as_secs_f64()
-    );
 
     // Extract frames from video
     let action_start = Instant::now();
@@ -541,41 +568,162 @@ pub fn swap_video(
     let log_interval = std::cmp::max(10, total_frames / 10);
     let processing_start = Instant::now();
 
-    // Process each frame
-    for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
-        let frame_img = img_io::load_image(frame_path)?;
-        let frame_rgb = img_io::to_rgb8(&frame_img);
-        let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+    if use_multi_face {
+        // Multi-face mode with clustering
+        log_main!(
+            "multi_face",
+            "Multi-face mode for video",
+            source_count = all_source_faces.len()
+        );
 
-        let target_faces = detector.detect(&frame_array, 0.5, 0.4)?;
+        // scan all frames and extract face embeddings
+        let scan_start = Instant::now();
+        let mut face_records = scan_frames_for_faces(&frame_paths, &mut detector, &mut recognizer)?;
+        log_main!(
+            "video_analysis",
+            "Frame scanning complete",
+            total_faces = face_records.len(),
+            elapsed_s = scan_start.elapsed().as_secs_f64()
+        );
 
-        if !target_faces.is_empty() {
-            let target_face = &target_faces[0];
+        // cluster faces across video
+        let cluster_start = Instant::now();
+        let max_k = 10;
+        let centroids = cluster_faces(&mut face_records, max_k)?;
+        log_main!(
+            "video_analysis",
+            "Face clustering complete",
+            clusters = centroids.nrows(),
+            elapsed_s = cluster_start.elapsed().as_secs_f64()
+        );
 
-            let _ = swap_single_pair(
-                &mut frame_array,
-                target_face,
-                source_image,
-                &source_embedding,
-                &mut swapper,
-                &mut enhancer,
-                &mut landmark_detector,
-                use_mouth_mask,
-            )?;
+        // Build cluster info and face lookup
+        let cluster_infos = build_cluster_info(&face_records, &centroids)?;
+        let face_lookup = build_face_lookup(&face_records);
+
+        // interactive mapping (source faces -> clusters)
+        let cluster_mappings = multi_face::build_cluster_mappings(
+            &all_source_faces,
+            &cluster_infos,
+            &source_images,
+            &frame_paths,
+        )?;
+        log_main!(
+            "multi_face",
+            "Cluster mapping created",
+            mappings = cluster_mappings.len()
+        );
+
+        // process all frames with cluster mappings
+        for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
+            let frame_img = img_io::load_image(frame_path)?;
+            let frame_rgb = img_io::to_rgb8(&frame_img);
+            let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+
+            // apply each mapping
+            for mapping in &cluster_mappings {
+                let key = (frame_idx, mapping.cluster_id);
+                if let Some(target_faces) = face_lookup.get(&key) {
+                    // swap all faces in this cluster at specific frame
+                    for target_face in target_faces {
+                        let source_info = &all_source_faces[mapping.source_idx];
+                        let source_img = &source_images[source_info.source_image_index];
+                        let source_embedding = &source_embeddings[mapping.source_idx];
+
+                        let _ = swap_single_pair(
+                            &mut frame_array,
+                            target_face,
+                            source_img,
+                            source_embedding,
+                            &mut swapper,
+                            &mut enhancer,
+                            &mut landmark_detector,
+                            use_mouth_mask,
+                        )?;
+                    }
+                }
+            }
+
+            let processed_frame = rgb::array3_to_rgb(&frame_array);
+            let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
+            img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+
+            if (frame_idx + 1) % log_interval == 0 {
+                log_main!(
+                    "video_processing",
+                    "Processing frames",
+                    processed = frame_idx + 1,
+                    total = total_frames,
+                    elapsed_s = processing_start.elapsed().as_secs_f64()
+                );
+            }
         }
+    } else {
+        // Single-face mode with embedding-based tracking
+        let source_face_info = &all_source_faces[0];
+        let source_image = &source_images[source_face_info.source_image_index];
+        let source_embedding = &source_embeddings[0];
 
-        let processed_frame = rgb::array3_to_rgb(&frame_array);
-        let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
-        img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+        log_main!(
+            "video_processing",
+            "Single-face mode with embedding-based matching"
+        );
 
-        if (frame_idx + 1) % log_interval == 0 {
-            log_main!(
-                "video_processing",
-                "Processing frames",
-                processed = frame_idx + 1,
-                total = total_frames,
-                elapsed_s = processing_start.elapsed().as_secs_f64()
-            );
+        // Extract reference embedding from first detected face
+        let mut reference_embedding: Option<Vec<f32>> = None;
+
+        for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
+            let frame_img = img_io::load_image(frame_path)?;
+            let frame_rgb = img_io::to_rgb8(&frame_img);
+            let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+
+            let target_faces = detector.detect(&frame_array, 0.5, 0.4)?;
+
+            if !target_faces.is_empty() {
+                // Initialize reference embedding from first frame
+                if reference_embedding.is_none() && !target_faces.is_empty() {
+                    let first_face = &target_faces[0];
+                    let aligned = alignment::align_face(&frame_array, first_face, 112)?;
+                    reference_embedding =
+                        Some(recognizer.extract_embedding(&aligned.aligned_image)?);
+                }
+
+                // find face most similar to reference embedding
+                if let Some(ref ref_emb) = reference_embedding {
+                    if let Some(target_face) = crate::utils::embedding::find_most_similar_face(
+                        &target_faces,
+                        ref_emb,
+                        &frame_array,
+                        &mut recognizer,
+                        0.3,
+                    )? {
+                        let _ = swap_single_pair(
+                            &mut frame_array,
+                            target_face,
+                            source_image,
+                            source_embedding,
+                            &mut swapper,
+                            &mut enhancer,
+                            &mut landmark_detector,
+                            use_mouth_mask,
+                        )?;
+                    }
+                }
+            }
+
+            let processed_frame = rgb::array3_to_rgb(&frame_array);
+            let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
+            img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+
+            if (frame_idx + 1) % log_interval == 0 {
+                log_main!(
+                    "video_processing",
+                    "Processing frames",
+                    processed = frame_idx + 1,
+                    total = total_frames,
+                    elapsed_s = processing_start.elapsed().as_secs_f64()
+                );
+            }
         }
     }
 
