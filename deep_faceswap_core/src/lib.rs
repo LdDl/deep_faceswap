@@ -11,6 +11,7 @@
 pub mod types;
 
 pub mod alignment;
+pub mod clustering;
 pub mod detection;
 pub mod enhancer;
 pub mod landmark;
@@ -20,9 +21,10 @@ pub mod recognition;
 pub mod swap;
 pub mod swapper;
 pub mod utils;
+pub mod video;
 
 #[macro_use]
 pub mod verbose;
 
-pub use swap::swap_faces;
+pub use swap::{swap_faces, swap_video};
 pub use types::{FaceSwapError, Result};

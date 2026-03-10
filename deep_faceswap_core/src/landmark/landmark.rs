@@ -15,9 +15,9 @@
 //! for precise mouth region identification.
 
 use crate::types::{DetectedFace, FaceSwapError, Result};
+use crate::utils::transform::warp_affine;
 use crate::verbose::{get_verbose_level, VerboseLevel, EVENT_LOAD_MODEL};
 use crate::{log_additional, log_main};
-use crate::utils::transform::warp_affine;
 use ndarray::{Array2, Array4};
 use ort::{
     inputs,

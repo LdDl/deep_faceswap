@@ -18,9 +18,13 @@ ndarray.workspace = true
 ort.workspace = true
 
 # Utilities
+rand = "0.8"
 rayon.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# Video processing
+ffmpeg-next.workspace = true
 
 # Serialization
 serde.workspace = true

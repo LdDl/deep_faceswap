@@ -13,17 +13,20 @@ Rust implementation of face swapping. Basically a port of [Deep-Live-Cam](https:
 ## Work in progress
 
 Current:
-- Basic face swap between two images (single source + single target)
+- Face swap for images (single source + single target)
+- Face swap for video (single source + target video, frame-by-frame)
 - Face detection using YOLOv8n from buffalo_l package
 - Face recognition using ArcFace w600k_r50
 - Face swapping using inswapper_128
 - Face enhancement using GFPGAN (optional)
 - Mouth mask to preserve target's mouth expression (optional)
-- Multi-face support with interactive mapping
+- Multi-face support with interactive mapping (images and video)
 - CUDA acceleration support via ONNX Runtime
+- ROI-based paste_back for high-resolution images (~50-100x faster on 4K, ~3.7x end-to-end on 720p video)
 
 Planned:
-- Video processing (single source + target)
+- Basic REST API: server-side processing, no file uploads - videos are already on the server; uploading feature could be added later, but what is a purpose if software intended for local use?
+- Basic web UI for the REST API. I am thinking of SvelteKit + Tailwind, but it will be very basic and minimalistic and cover just CLI capabilities.
 - Online video (low priority)
 
 ## Quick start
@@ -206,6 +209,37 @@ Without `--multi-face` flag, only the highest-score face from each image is used
 
 Multi-face mode works with `--enhance` and `--mouth-mask` flags - all swapped faces will be enhanced/masked accordingly.
 
+### Video processing
+
+When the target is a video file, the tool automatically switches to video mode:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target video.mp4 \
+  --output output.mp4
+```
+
+The video pipeline:
+1. Extracts all frames from the target video
+2. Scans frames for faces and builds clusters using K-means
+3. Processes each frame: detects face, matches to cluster, swaps
+4. Re-encodes the result with the original audio track
+
+All image flags work with video too (`--enhance`, `--mouth-mask`, `--multi-face`).
+
+Without `--multi-face`, only one face is swapped per frame (the one closest to the source embedding). If the video contains multiple people and you want to swap more than one face, use `--multi-face`; then the tool will scan the video, cluster all detected faces, show you representative crops, and ask which source should map to which cluster.
+
+You can specify a custom temporary directory for extracted frames:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target video.mp4 \
+  --output output.mp4 \
+  --video-tmp-dir /path/to/tmp
+```
+
 ### Custom model paths
 
 ```bash
@@ -230,6 +264,7 @@ deep-faceswap-cli swap \
 
 - Downloaded models
 - Source and target images.
+- FFmpeg libraries (libavcodec, libavformat, etc.) for video processing
 - CUDA and cuDNN for GPU acceleration (optional, but recommended for better performance)
 
 ## CUDA support
@@ -251,7 +286,6 @@ When built with the cuda feature, the tool will use CUDA for inference. If CUDA 
 ## Project structure
 
 @todo
-
 ## License
 
 @todo
