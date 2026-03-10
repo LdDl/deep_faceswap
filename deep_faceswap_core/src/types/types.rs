@@ -175,3 +175,34 @@ pub struct SourceFaceInfo {
     /// Filename of source image (e.g., "image1.jpg")
     pub source_filename: String,
 }
+
+/// Mapping from source face to target cluster for video multi-face swapping
+///
+/// Specifies which source face should be swapped onto which face cluster.
+/// Used for video processing where faces are clustered across frames.
+#[derive(Debug, Clone)]
+pub struct ClusterMapping {
+    /// Index of source face (0-based)
+    pub source_idx: usize,
+
+    /// ID of target cluster (0-based)
+    pub cluster_id: usize,
+}
+
+/// Crop information for cluster example faces
+///
+/// Similar to FaceCropInfo but includes cluster metadata for display
+#[derive(Debug, Clone)]
+pub struct ClusterCropInfo {
+    /// The example face from this cluster
+    pub face: DetectedFace,
+
+    /// Path to saved crop image
+    pub crop_path: String,
+
+    /// Cluster ID (0-based)
+    pub cluster_id: usize,
+
+    /// Number of frames this face appears in
+    pub frame_count: usize,
+}
