@@ -11,6 +11,7 @@
 pub mod types;
 
 pub mod alignment;
+pub mod clustering;
 pub mod detection;
 pub mod enhancer;
 pub mod landmark;
