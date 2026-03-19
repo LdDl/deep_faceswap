@@ -21,6 +21,8 @@ use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::time::Instant;
 
+const FRAME_JPEG_QUALITY: Option<u8> = Some(95);
+
 /// Swap a single source face into a single target face
 ///
 /// # Arguments
@@ -677,7 +679,7 @@ pub fn swap_video(
 
             let processed_frame = rgb::array3_to_rgb(&frame_array);
             let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
-            img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+            img_io::save_image_quiet(&processed_frame, &output_frame_path, FRAME_JPEG_QUALITY)?;
 
             if (frame_idx + 1) % log_interval == 0 {
                 log_main!(
@@ -744,7 +746,7 @@ pub fn swap_video(
 
             let processed_frame = rgb::array3_to_rgb(&frame_array);
             let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
-            img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+            img_io::save_image_quiet(&processed_frame, &output_frame_path, FRAME_JPEG_QUALITY)?;
 
             if (frame_idx + 1) % log_interval == 0 {
                 log_main!(
@@ -849,7 +851,7 @@ pub fn swap_video_frames_with_mappings(
 
         let processed_frame = rgb::array3_to_rgb(&frame_array);
         let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
-        img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+        img_io::save_image_quiet(&processed_frame, &output_frame_path, FRAME_JPEG_QUALITY)?;
 
         if let Some(ref cb) = progress_callback {
             cb(frame_idx + 1, total_frames);
@@ -952,7 +954,7 @@ pub fn swap_video_frames_single(
 
         let processed_frame = rgb::array3_to_rgb(&frame_array);
         let output_frame_path = format!("{}/frame_{:06}.jpg", processed_frames_dir, frame_idx);
-        img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+        img_io::save_image_quiet(&processed_frame, &output_frame_path, FRAME_JPEG_QUALITY)?;
 
         if let Some(ref cb) = progress_callback {
             cb(frame_idx + 1, total_frames);
