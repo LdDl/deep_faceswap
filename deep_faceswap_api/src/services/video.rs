@@ -2,7 +2,7 @@
 //! POST /api/video/analyze - Analyze video (detect faces, cluster)
 //! POST /api/swap/video - Start video swap job (async)
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from_infos_to};
 use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
 use deep_faceswap_core::utils::{image as img_io, rgb};
@@ -37,7 +37,7 @@ pub struct ClusterInfo {
 }
 
 /// Video analysis request
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct VideoAnalyzeRequest {
     /// Paths to source face images
     #[schema(example = json!(["/home/user/source.jpg"]))]
@@ -61,7 +61,7 @@ pub struct VideoAnalyzeResponse {
 }
 
 /// Video swap request with cluster mappings
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct VideoSwapRequest {
     /// Session ID from video analysis
     #[schema(example = "v1b2c3d4")]
@@ -109,11 +109,15 @@ pub struct VideoSwapResponse {
     )
 )]
 pub async fn analyze_video(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     req: web::Json<VideoAnalyzeRequest>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
     let state = state.into_inner();
     let req = req.into_inner();
+    let req_body = serde_json::to_string(&req).unwrap_or_default();
 
     let result = tokio::task::spawn_blocking(move || {
         let start = Instant::now();
@@ -235,10 +239,29 @@ pub async fn analyze_video(
 
     match result {
         Ok(Ok(response)) => HttpResponse::Ok().json(response),
-        Ok(Err(msg)) => HttpResponse::BadRequest().json(ErrorResponse { error_text: msg }),
-        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
-            error_text: format!("Task failed: {}", e),
-        }),
+        Ok(Err(msg)) => {
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                body = req_body.as_str(),
+                error = msg.as_str(),
+                "Can't analyze video"
+            );
+            HttpResponse::BadRequest().json(ErrorResponse { error_text: msg })
+        }
+        Err(e) => {
+            let err_msg = format!("Task failed: {}", e);
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                body = req_body.as_str(),
+                error = err_msg.as_str(),
+                "Can't analyze video"
+            );
+            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+        }
     }
 }
 
@@ -254,11 +277,15 @@ pub async fn analyze_video(
     )
 )]
 pub async fn swap_video(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     req: web::Json<VideoSwapRequest>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
     let state = state.into_inner();
     let req = req.into_inner();
+    let req_body = serde_json::to_string(&req).unwrap_or_default();
 
     let job_id = Uuid::new_v4().to_string()[..8].to_string();
 
@@ -270,6 +297,9 @@ pub async fn swap_video(
 
     let state_clone = state.clone();
     let job_id_clone = job_id.clone();
+    let log_method = method;
+    let log_route = route;
+    let log_body = req_body;
 
     tokio::task::spawn_blocking(move || {
         // Update status to running
@@ -448,6 +478,15 @@ pub async fn swap_video(
                     });
                 }
                 Err(e) => {
+                    tracing::error!(
+                        scope = "api",
+                        method = log_method.as_str(),
+                        route = log_route.as_str(),
+                        body = log_body.as_str(),
+                        job_id = job_id_clone.as_str(),
+                        error = e.as_str(),
+                        "Can't swap video"
+                    );
                     job.status = JobStatus::Failed;
                     job.progress.stage = "failed".to_string();
                     job.error = Some(e);

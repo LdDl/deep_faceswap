@@ -1,6 +1,6 @@
 //! GET /api/jobs/{job_id} - Poll job status
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use crate::error::ErrorResponse;
 use crate::jobs::JobState;
 use crate::state::AppState;
@@ -19,16 +19,27 @@ use crate::state::AppState;
     )
 )]
 pub async fn get_job_status(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     path: web::Path<String>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
     let job_id = path.into_inner();
     let jobs = state.jobs.lock().unwrap();
 
     match jobs.get(&job_id) {
         Some(job) => HttpResponse::Ok().json(job),
-        None => HttpResponse::NotFound().json(ErrorResponse {
-            error_text: format!("Job not found: {}", job_id),
-        }),
+        None => {
+            let err_msg = format!("Job not found: {}", job_id);
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                error = err_msg.as_str(),
+                "Can't get job status"
+            );
+            HttpResponse::NotFound().json(ErrorResponse { error_text: err_msg })
+        }
     }
 }

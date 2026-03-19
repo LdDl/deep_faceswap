@@ -1,6 +1,6 @@
 //! POST /api/swap/image - Execute face swap on still image
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
 use deep_faceswap_core::swap::swap_with_mappings;
@@ -13,7 +13,7 @@ use crate::error::ErrorResponse;
 use crate::state::AppState;
 
 /// Image swap request with explicit face mappings
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct SwapImageRequest {
     /// Paths to source face images
     #[schema(example = json!(["/home/user/source.jpg"]))]
@@ -60,11 +60,15 @@ pub struct SwapImageResponse {
     )
 )]
 pub async fn swap_image(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     req: web::Json<SwapImageRequest>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
     let state = state.into_inner();
     let req = req.into_inner();
+    let req_body = serde_json::to_string(&req).unwrap_or_default();
 
     let result = tokio::task::spawn_blocking(move || {
         let mut detector = state.models.detector.lock().unwrap();
@@ -174,9 +178,28 @@ pub async fn swap_image(
 
     match result {
         Ok(Ok(response)) => HttpResponse::Ok().json(response),
-        Ok(Err(msg)) => HttpResponse::BadRequest().json(ErrorResponse { error_text: msg }),
-        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
-            error_text: format!("Task failed: {}", e),
-        }),
+        Ok(Err(msg)) => {
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                body = req_body.as_str(),
+                error = msg.as_str(),
+                "Can't swap image"
+            );
+            HttpResponse::BadRequest().json(ErrorResponse { error_text: msg })
+        }
+        Err(e) => {
+            let err_msg = format!("Task failed: {}", e);
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                body = req_body.as_str(),
+                error = err_msg.as_str(),
+                "Can't swap image"
+            );
+            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+        }
     }
 }

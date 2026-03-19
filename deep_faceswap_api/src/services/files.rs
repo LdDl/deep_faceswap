@@ -1,6 +1,6 @@
 //! GET /api/files - Browse server filesystem
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use crate::error::ErrorResponse;
@@ -46,23 +46,41 @@ pub struct FilesResponse {
     )
 )]
 pub async fn list_files(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     query: web::Query<FilesQuery>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
+    let query_string = http_req.query_string().to_string();
     let path = &query.path;
 
     if !state.is_path_allowed(path) {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error_text: format!("Path not allowed: {}", path),
-        });
+        let err_msg = format!("Path not allowed: {}", path);
+        tracing::error!(
+            scope = "api",
+            method = method.as_str(),
+            route = route.as_str(),
+            query = query_string.as_str(),
+            error = err_msg.as_str(),
+            "Can't list files"
+        );
+        return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
     }
 
     let read_dir = match std::fs::read_dir(path) {
         Ok(rd) => rd,
         Err(e) => {
-            return HttpResponse::BadRequest().json(ErrorResponse {
-                error_text: format!("Cannot read directory '{}': {}", path, e),
-            });
+            let err_msg = format!("Cannot read directory '{}': {}", path, e);
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                query = query_string.as_str(),
+                error = err_msg.as_str(),
+                "Can't list files"
+            );
+            return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
         }
     };
 

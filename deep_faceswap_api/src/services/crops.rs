@@ -1,6 +1,6 @@
 //! GET /api/crops/{session_id}/{role}/{filename} - Serve face crop images
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use crate::error::ErrorResponse;
 use crate::state::AppState;
 
@@ -21,22 +21,37 @@ use crate::state::AppState;
     )
 )]
 pub async fn serve_crop(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     path: web::Path<(String, String, String)>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
     let (session_id, role, filename) = path.into_inner();
 
     if !["source", "target", "cluster"].contains(&role.as_str()) {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error_text: format!("Invalid role: {}", role),
-        });
+        let err_msg = format!("Invalid role: {}", role);
+        tracing::error!(
+            scope = "api",
+            method = method.as_str(),
+            route = route.as_str(),
+            error = err_msg.as_str(),
+            "Can't serve crop"
+        );
+        return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
     }
 
     // Prevent directory traversal
     if session_id.contains("..") || filename.contains("..") {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error_text: "Invalid path".to_string(),
-        });
+        let err_msg = "Invalid path".to_string();
+        tracing::error!(
+            scope = "api",
+            method = method.as_str(),
+            route = route.as_str(),
+            error = err_msg.as_str(),
+            "Can't serve crop"
+        );
+        return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
     }
 
     let file_path = format!("{}/{}/{}/{}", state.tmp_dir, session_id, role, filename);
@@ -45,8 +60,16 @@ pub async fn serve_crop(
         Ok(data) => HttpResponse::Ok()
             .content_type("image/jpeg")
             .body(data),
-        Err(_) => HttpResponse::NotFound().json(ErrorResponse {
-            error_text: format!("Crop not found: {}/{}/{}", session_id, role, filename),
-        }),
+        Err(_) => {
+            let err_msg = format!("Crop not found: {}/{}/{}", session_id, role, filename);
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                error = err_msg.as_str(),
+                "Can't serve crop"
+            );
+            HttpResponse::NotFound().json(ErrorResponse { error_text: err_msg })
+        }
     }
 }

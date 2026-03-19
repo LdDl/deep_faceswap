@@ -1,6 +1,6 @@
 //! POST /api/detect - Detect faces in source and target images
 
-use actix_web::{web, HttpResponse};
+use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::multi_face::{save_face_crops_from_infos_to, save_face_crops_to};
 use deep_faceswap_core::types::{BBox, SourceFaceInfo};
 use deep_faceswap_core::utils::{image as img_io, rgb};
@@ -10,7 +10,7 @@ use crate::error::ErrorResponse;
 use crate::state::AppState;
 
 /// Face detection request
-#[derive(Deserialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 pub struct DetectRequest {
     /// Paths to source face images
     #[schema(example = json!(["/home/user/source.jpg"]))]
@@ -60,11 +60,15 @@ pub struct DetectResponse {
     )
 )]
 pub async fn detect_faces(
+    http_req: HttpRequest,
     state: web::Data<AppState>,
     req: web::Json<DetectRequest>,
 ) -> HttpResponse {
+    let method = http_req.method().to_string();
+    let route = http_req.path().to_string();
     let state = state.into_inner();
     let req = req.into_inner();
+    let req_body = serde_json::to_string(&req).unwrap_or_default();
 
     let result = tokio::task::spawn_blocking(move || {
         let session_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
@@ -199,9 +203,28 @@ pub async fn detect_faces(
 
     match result {
         Ok(Ok(response)) => HttpResponse::Ok().json(response),
-        Ok(Err(msg)) => HttpResponse::BadRequest().json(ErrorResponse { error_text: msg }),
-        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
-            error_text: format!("Task failed: {}", e),
-        }),
+        Ok(Err(msg)) => {
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                body = req_body.as_str(),
+                error = msg.as_str(),
+                "Can't detect faces"
+            );
+            HttpResponse::BadRequest().json(ErrorResponse { error_text: msg })
+        }
+        Err(e) => {
+            let err_msg = format!("Task failed: {}", e);
+            tracing::error!(
+                scope = "api",
+                method = method.as_str(),
+                route = route.as_str(),
+                body = req_body.as_str(),
+                error = err_msg.as_str(),
+                "Can't detect faces"
+            );
+            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+        }
     }
 }
