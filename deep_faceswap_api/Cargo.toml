@@ -1,0 +1,31 @@
+[package]
+name = "deep_faceswap_api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "deep-faceswap-api"
+path = "src/main.rs"
+
+[features]
+default = []
+cuda = ["deep_faceswap_core/cuda"]
+
+[dependencies]
+deep_faceswap_core = { path = "../deep_faceswap_core", features = ["utoipa"] }
+
+actix-web.workspace = true
+actix-cors.workspace = true
+actix-files.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+utoipa = { workspace = true, features = ["actix_extras"] }
+utoipa-rapidoc.workspace = true
+
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
