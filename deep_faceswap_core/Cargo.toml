@@ -32,7 +32,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 # OpenAPI (optional, for API crate)
-utoipa = { version="5.4.0", workspace = true, optional = true }
+utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]
 approx = "0.5"  # For float comparisons in tests

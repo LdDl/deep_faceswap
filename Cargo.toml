@@ -43,4 +43,4 @@ actix-files = "0.6.10"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 utoipa = { version="5.4.0" }
-utoipa-rapidoc = { version = "3", features = ["actix-web"] }
+utoipa-rapidoc = { version = "6", features = ["actix-web"] }
