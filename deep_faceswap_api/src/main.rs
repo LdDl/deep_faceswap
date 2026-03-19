@@ -30,7 +30,7 @@ struct Cli {
     host: String,
 
     /// Port to listen on
-    #[arg(long, default_value = "8080")]
+    #[arg(long, default_value = "36000")]
     port: u16,
 
     /// Path to detection model

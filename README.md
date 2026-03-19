@@ -276,7 +276,7 @@ The project includes a web-based interface built with SvelteKit + Tailwind CSS, 
 
 ```bash
 ./target/release/deep-faceswap-api \
-  --port 8080 \
+  --port 36000 \
   --ui-dir ./frontend/build \
   --detector models/buffalo_l/det_10g.onnx \
   --recognizer models/buffalo_l/w600k_r50.onnx \
@@ -294,7 +294,7 @@ Most of the options are the same as CLI, but some are specific to the API server
 | Flag | Default | Description |
 |---|---|---|
 | `--host` | `0.0.0.0` | Host to bind to |
-| `--port` | `8080` | Port to listen on |
+| `--port` | `36000` | Port to listen on |
 | `--ui-dir` | (none) | Path to SvelteKit build directory |
 | `--detector` | `models/buffalo_l/det_10g.onnx` | Face detection model |
 | `--recognizer` | `models/buffalo_l/w600k_r50.onnx` | Face recognition model |
@@ -306,7 +306,7 @@ Most of the options are the same as CLI, but some are specific to the API server
 
 ### API documentation
 
-When the server is running, interactive API docs are available at `http://localhost:8080/api/docs`.
+When the server is running, interactive API docs are available at `http://localhost:36000/api/docs`.
 
 ## CUDA support
 
