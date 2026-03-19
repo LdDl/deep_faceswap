@@ -29,6 +29,7 @@ tmp/
 frontend/node_modules/
 frontend/build/
 frontend/.svelte-kit/
+frontend/
 
 # Python
 __pycache__/
