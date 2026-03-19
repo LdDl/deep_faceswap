@@ -6,6 +6,7 @@ Rust implementation of face swapping. Basically a port of [Deep-Live-Cam](https:
 - [Work in progress](#work-in-progress)
 - [Quick start](#quick-start)
 - [CLI usage](#cli-usage)
+- [Web UI and REST API](#web-ui-and-rest-api)
 - [CUDA support](#cuda-support)
 - [Project structure](#project-structure)
 - [License](#license)
@@ -23,10 +24,10 @@ Current:
 - Multi-face support with interactive mapping (images and video)
 - CUDA acceleration support via ONNX Runtime
 - ROI-based paste_back for high-resolution images (~50-100x faster on 4K, ~3.7x end-to-end on 720p video)
+- REST API server (actix-web) with interactive API docs
+- Web UI (SvelteKit + Tailwind CSS) for image and video face swapping
 
 Planned:
-- Basic REST API: server-side processing, no file uploads - videos are already on the server; uploading feature could be added later, but what is a purpose if software intended for local use?
-- Basic web UI for the REST API. I am thinking of SvelteKit + Tailwind, but it will be very basic and minimalistic and cover just CLI capabilities.
 - Online video (low priority)
 
 ## Quick start
@@ -266,6 +267,46 @@ deep-faceswap-cli swap \
 - Source and target images.
 - FFmpeg libraries (libavcodec, libavformat, etc.) for video processing
 - CUDA and cuDNN for GPU acceleration (optional, but recommended for better performance)
+
+## Web UI and REST API
+
+The project includes a web-based interface built with SvelteKit + Tailwind CSS, served by an actix-web REST API server. It provides the same capabilities as the CLI but with a visual interface for face mapping and progress tracking.
+
+### Start the API server
+
+```bash
+./target/release/deep-faceswap-api \
+  --port 8080 \
+  --ui-dir ./frontend/build \
+  --detector models/buffalo_l/det_10g.onnx \
+  --recognizer models/buffalo_l/w600k_r50.onnx \
+  --swapper models/inswapper_128.onnx \
+  --enhancer models/GFPGANv1.4.onnx \
+  --landmark-model models/buffalo_l/2d106det.onnx
+```
+
+The `--enhancer` and `--landmark-model` flags are optional. Without them, the enhance and mouth mask features will not be available in the UI.
+
+### Available options
+
+Most of the options are the same as CLI, but some are specific to the API server of course.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--host` | `0.0.0.0` | Host to bind to |
+| `--port` | `8080` | Port to listen on |
+| `--ui-dir` | (none) | Path to SvelteKit build directory |
+| `--detector` | `models/buffalo_l/det_10g.onnx` | Face detection model |
+| `--recognizer` | `models/buffalo_l/w600k_r50.onnx` | Face recognition model |
+| `--swapper` | `models/inswapper_128.onnx` | Face swapper model |
+| `--enhancer` | (none) | GFPGAN enhancement model |
+| `--landmark-model` | (none) | 106-point landmark model for mouth mask |
+| `--allowed-dir` | (all) | Comma-separated directories the file browser can access |
+| `-v, --verbose` | `1` | Verbose level: 0 (errors), 1 (main), 2 (details), 3 (all) |
+
+### API documentation
+
+When the server is running, interactive API docs are available at `http://localhost:8080/api/docs`.
 
 ## CUDA support
 
