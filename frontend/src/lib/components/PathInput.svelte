@@ -1,12 +1,16 @@
 <script>
 	import FileBrowser from './FileBrowser.svelte';
 
-	let { label, value, filterExtensions, onchange } = $props();
+	let { label, value, filterExtensions, storageKey = '', onchange } = $props();
 
 	let browserOpen = $state(false);
 
 	/** @param {string} path */
 	function handleSelect(path) {
+		if (storageKey) {
+			const dir = path.replace(/\/[^/]+$/, '') || '/';
+			localStorage.setItem(`browse_dir_${storageKey}`, dir);
+		}
 		onchange(path);
 		browserOpen = false;
 	}
@@ -16,6 +20,9 @@
 		if (value) {
 			const dir = value.replace(/\/[^/]+$/, '');
 			return dir || '/';
+		}
+		if (storageKey) {
+			return localStorage.getItem(`browse_dir_${storageKey}`) || '/';
 		}
 		return '/';
 	}

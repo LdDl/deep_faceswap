@@ -10,8 +10,8 @@
 		<span class="text-lg font-semibold text-gray-200">Deep FaceSwap</span>
 		<div class="flex gap-1">
 			<a
-				href="/images"
-				class="px-3 py-1.5 rounded text-sm transition-colors {$page.url.pathname === '/images' || $page.url.pathname === '/' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}"
+				href="/image"
+				class="px-3 py-1.5 rounded text-sm transition-colors {$page.url.pathname === '/image' || $page.url.pathname === '/' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-gray-200'}"
 			>
 				Image
 			</a>

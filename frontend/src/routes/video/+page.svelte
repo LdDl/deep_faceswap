@@ -1,5 +1,6 @@
 <script>
 	import PathInput from '$lib/components/PathInput.svelte';
+	import MediaPreview from '$lib/components/MediaPreview.svelte';
 	import FaceMapper from '$lib/components/FaceMapper.svelte';
 	import OptionsBar from '$lib/components/OptionsBar.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
@@ -140,6 +141,7 @@
 						label={i === 0 ? 'Source image(s)' : ''}
 						value={path}
 						filterExtensions={imageExtensions}
+						storageKey="source"
 						onchange={(v) => updateSourcePath(i, v)}
 					/>
 				</div>
@@ -161,19 +163,37 @@
 		</button>
 	</div>
 
+	<!-- Source previews -->
+	{#if sourcePaths.some((p) => p.trim())}
+		<div class="flex gap-3 flex-wrap">
+			{#each sourcePaths as path}
+				{#if path.trim()}
+					<MediaPreview {path} />
+				{/if}
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Target video path -->
 	<PathInput
 		label="Target video"
 		value={targetVideoPath}
 		filterExtensions={videoExtensions}
+		storageKey="target_video"
 		onchange={(v) => (targetVideoPath = v)}
 	/>
+
+	<!-- Target video preview -->
+	{#if targetVideoPath.trim()}
+		<MediaPreview path={targetVideoPath} type="video" />
+	{/if}
 
 	<!-- Output path -->
 	<PathInput
 		label="Output path"
 		value={outputPath}
 		filterExtensions={videoExtensions}
+		storageKey="output_video"
 		onchange={(v) => (outputPath = v)}
 	/>
 
@@ -238,6 +258,7 @@
 				<div class="text-sm text-green-400">Video swap completed.</div>
 				{#if job.result}
 					<div class="text-xs text-gray-500">Output: {job.result.output_path}</div>
+					<MediaPreview path={job.result.output_path} type="video" />
 				{/if}
 			{/if}
 

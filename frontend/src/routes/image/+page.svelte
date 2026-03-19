@@ -1,5 +1,6 @@
 <script>
 	import PathInput from '$lib/components/PathInput.svelte';
+	import MediaPreview from '$lib/components/MediaPreview.svelte';
 	import FaceMapper from '$lib/components/FaceMapper.svelte';
 	import OptionsBar from '$lib/components/OptionsBar.svelte';
 	import { detectFaces } from '$lib/stores/detection.js';
@@ -113,6 +114,7 @@
 						label={i === 0 ? 'Source image(s)' : ''}
 						value={path}
 						filterExtensions={imageExtensions}
+						storageKey="source"
 						onchange={(v) => updateSourcePath(i, v)}
 					/>
 				</div>
@@ -134,19 +136,37 @@
 		</button>
 	</div>
 
+	<!-- Source previews -->
+	{#if sourcePaths.some((p) => p.trim())}
+		<div class="flex gap-3 flex-wrap">
+			{#each sourcePaths as path}
+				{#if path.trim()}
+					<MediaPreview {path} />
+				{/if}
+			{/each}
+		</div>
+	{/if}
+
 	<!-- Target path -->
 	<PathInput
 		label="Target image"
 		value={targetPath}
 		filterExtensions={imageExtensions}
+		storageKey="target"
 		onchange={(v) => (targetPath = v)}
 	/>
+
+	<!-- Target preview -->
+	{#if targetPath.trim()}
+		<MediaPreview path={targetPath} />
+	{/if}
 
 	<!-- Output path -->
 	<PathInput
 		label="Output path"
 		value={outputPath}
 		filterExtensions={imageExtensions}
+		storageKey="output"
 		onchange={(v) => (outputPath = v)}
 	/>
 
@@ -195,12 +215,13 @@
 
 	<!-- Result -->
 	{#if swapResult}
-		<div class="border-t border-gray-800 pt-4">
+		<div class="border-t border-gray-800 pt-4 flex flex-col gap-3">
 			<div class="text-sm text-green-400">
 				Swap completed in {swapResult.elapsed_s.toFixed(1)}s. {swapResult.faces_swapped} face(s)
 				swapped.
 			</div>
-			<div class="text-xs text-gray-500 mt-1">Output: {swapResult.output_path}</div>
+			<div class="text-xs text-gray-500">Output: {swapResult.output_path}</div>
+			<MediaPreview path={swapResult.output_path} />
 		</div>
 	{/if}
 </div>

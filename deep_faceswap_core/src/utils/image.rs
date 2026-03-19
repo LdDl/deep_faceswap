@@ -32,7 +32,7 @@ pub fn save_image_quiet(img: &RgbImage, path: &str, quality: Option<u8>) -> Resu
     match quality {
         Some(q) => {
             let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-            let encoder = JpegEncoder::new_with_quality(file, q);
+            let mut encoder = JpegEncoder::new_with_quality(file, q);
             encoder.encode_image(img)?;
         }
         None => img.save(path)?,

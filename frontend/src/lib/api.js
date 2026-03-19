@@ -34,3 +34,11 @@ export function cropUrl(serverPath) {
 	const relative = serverPath.replace(/^\/api\//, '/')
 	return conn.getAddress(relative)
 }
+
+/**
+ * @param {string} absolutePath
+ * @returns {string}
+ */
+export function fileUrl(absolutePath) {
+	return conn.getAddress(`/file?path=${encodeURIComponent(absolutePath)}`)
+}

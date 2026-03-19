@@ -11,6 +11,7 @@ mod crops;
 mod swap_image;
 mod video;
 mod jobs;
+mod serve_file;
 
 use utoipa::OpenApi;
 use utoipa_rapidoc::RapiDoc;
@@ -49,6 +50,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
                     web::scope("/jobs")
                         .route("/{job_id}", web::get().to(jobs::get_job_status))
                 )
+                .route("/file", web::get().to(serve_file::serve_file))
         );
 
     // Serve SvelteKit build if UI_DIR is set
@@ -80,6 +82,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
         video::analyze_video,
         video::swap_video,
         jobs::get_job_status,
+        serve_file::serve_file,
     ),
     tags(
         (name = "System", description = "Health check and system status"),

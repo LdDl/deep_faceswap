@@ -1,4 +1,8 @@
 //! POST /api/detect - Detect faces in source and target images
+//!
+//! Always returns ALL detected faces (multi-face is forced in the API).
+//! Unlike the CLI which has a --multi-face flag and falls back to highest-score,
+//! the API always exposes every face and lets the UI handle mapping.
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::multi_face::{save_face_crops_from_infos_to, save_face_crops_to};
