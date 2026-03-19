@@ -25,8 +25,21 @@ pub fn save_face_crops(
     image: &Array3<u8>,
     is_source: bool,
 ) -> Result<Vec<FaceCropInfo>> {
+    save_face_crops_to(faces, image, is_source, "./tmp/face_crops")
+}
+
+/// Save detected faces as crop images to a custom directory
+///
+/// Like save_face_crops but with configurable base directory.
+/// Creates {base_dir}/{source,target}/ subdirectory structure.
+pub fn save_face_crops_to(
+    faces: &[DetectedFace],
+    image: &Array3<u8>,
+    is_source: bool,
+    base_dir: &str,
+) -> Result<Vec<FaceCropInfo>> {
     let subdir = if is_source { "source" } else { "target" };
-    let crop_dir = format!("./tmp/face_crops/{}", subdir);
+    let crop_dir = format!("{}/{}", base_dir, subdir);
 
     fs::create_dir_all(&crop_dir)?;
 
@@ -97,7 +110,17 @@ pub fn save_face_crops_from_infos(
     source_infos: &[SourceFaceInfo],
     source_images: &[Array3<u8>],
 ) -> Result<Vec<FaceCropInfo>> {
-    let crop_dir = "./tmp/face_crops/source";
+    save_face_crops_from_infos_to(source_infos, source_images, "./tmp/face_crops/source")
+}
+
+/// Save source faces from multiple images to a custom directory
+///
+/// Like save_face_crops_from_infos but with configurable output directory.
+pub fn save_face_crops_from_infos_to(
+    source_infos: &[SourceFaceInfo],
+    source_images: &[Array3<u8>],
+    crop_dir: &str,
+) -> Result<Vec<FaceCropInfo>> {
     fs::create_dir_all(crop_dir)?;
 
     let mut crop_infos = Vec::new();
@@ -251,9 +274,19 @@ pub fn save_cluster_crops(
     cluster_infos: &[ClusterInfo],
     frame_paths: &[String],
 ) -> Result<Vec<ClusterCropInfo>> {
+    save_cluster_crops_to(cluster_infos, frame_paths, "./tmp/face_crops/clusters")
+}
+
+/// Save cluster example faces to a custom directory
+///
+/// Like save_cluster_crops but with configurable output directory.
+pub fn save_cluster_crops_to(
+    cluster_infos: &[ClusterInfo],
+    frame_paths: &[String],
+    crop_dir: &str,
+) -> Result<Vec<ClusterCropInfo>> {
     use crate::utils::{image as img_io, rgb};
 
-    let crop_dir = "./tmp/face_crops/clusters";
     fs::create_dir_all(crop_dir)?;
 
     let mut crop_infos = Vec::new();
