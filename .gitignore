@@ -24,6 +24,12 @@ Thumbs.db
 debug/
 test.sh
 tmp/
+data/
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.svelte-kit/
 
 # Python
 __pycache__/
