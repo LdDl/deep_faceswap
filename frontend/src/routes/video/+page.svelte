@@ -1,4 +1,5 @@
 <script>
+	import { onMount, onDestroy } from 'svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
 	import MediaPreview from '$lib/components/MediaPreview.svelte';
 	import FaceMapper from '$lib/components/FaceMapper.svelte';
@@ -29,6 +30,67 @@
 
 	/** @type {ReturnType<typeof setInterval>|null} */
 	let pollTimer = null;
+
+	const ACTIVE_JOB_KEY = 'video_active_job';
+
+	/**
+	 * Save active job info to localStorage for session recovery.
+	 * @param {string} jobId
+	 * @param {string} outPath
+	 */
+	function saveActiveJob(jobId, outPath) {
+		localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({
+			job_id: jobId,
+			output_path: outPath,
+		}));
+	}
+
+	function clearActiveJob() {
+		localStorage.removeItem(ACTIVE_JOB_KEY);
+	}
+
+	// Recover a previously active job on page load
+	async function tryRecoverJob() {
+		const raw = localStorage.getItem(ACTIVE_JOB_KEY);
+		if (!raw) return;
+
+		try {
+			const saved = JSON.parse(raw);
+			if (!saved.job_id) return;
+
+			if (saved.output_path && !outputPath.trim()) {
+				outputPath = saved.output_path;
+			}
+
+			const state = await getJobStatus(saved.job_id);
+			job = state;
+
+			if (state.status === 'completed' || state.status === 'failed') {
+				clearActiveJob();
+			} else {
+				startPolling(saved.job_id);
+			}
+		} catch {
+			clearActiveJob();
+		}
+	}
+
+	$effect(() => {
+		if (job && (job.status === 'completed' || job.status === 'failed')) {
+			clearActiveJob();
+		}
+	});
+
+	onMount(() => {
+		tryRecoverJob();
+	});
+
+	onDestroy(() => {
+		if (pollTimer) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
+	});
 
 	function addSourcePath() {
 		sourcePaths = [...sourcePaths, ''];
@@ -100,6 +162,7 @@
 			};
 
 			startPolling(res.job_id);
+			saveActiveJob(res.job_id, outputPath);
 		} catch (e) {
 			error = e.error_text || e.message || 'Failed to start swap';
 		} finally {
