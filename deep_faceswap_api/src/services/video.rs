@@ -45,6 +45,9 @@ pub struct VideoAnalyzeRequest {
     /// Path to target video
     #[schema(example = "/home/user/video.mp4")]
     pub target_video_path: String,
+    /// Custom directory for temporary files (frames, crops). Falls back to server default.
+    #[serde(default)]
+    pub tmp_dir: Option<String>,
 }
 
 /// Video analysis response with source faces and target clusters
@@ -85,6 +88,9 @@ pub struct VideoSwapRequest {
     #[serde(default)]
     #[schema(example = false)]
     pub mouth_mask: bool,
+    /// Custom directory for temporary files. Falls back to server default.
+    #[serde(default)]
+    pub tmp_dir: Option<String>,
 }
 
 /// Video swap job creation response
@@ -122,7 +128,10 @@ pub async fn analyze_video(
     let result = tokio::task::spawn_blocking(move || {
         let start = Instant::now();
         let session_id = Uuid::new_v4().to_string()[..8].to_string();
-        let crop_base = format!("{}/{}", state.tmp_dir, session_id);
+        let base_tmp = req.tmp_dir.as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&state.tmp_dir);
+        let crop_base = format!("{}/{}", base_tmp, session_id);
 
         let mut detector = state.models.detector.lock().unwrap();
         let mut recognizer = state.models.recognizer.lock().unwrap();
@@ -324,7 +333,10 @@ pub async fn swap_video(
             let enhancer_ref: &mut Option<_> = if req.enhance { &mut *enhancer } else { &mut no_enhancer };
             let landmark_ref: &mut Option<_> = if req.mouth_mask { &mut *landmark_detector } else { &mut no_landmark };
 
-            let session_dir = format!("{}/{}", state_clone.tmp_dir, req.session_id);
+            let base_tmp = req.tmp_dir.as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&state_clone.tmp_dir);
+            let session_dir = format!("{}/{}", base_tmp, req.session_id);
 
             // Load source images and detect faces
             let mut source_images = Vec::new();

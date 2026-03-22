@@ -57,6 +57,10 @@ struct Cli {
     #[arg(long, default_value = "")]
     allowed_dir: String,
 
+    /// Base directory for temporary files (session data, video frames)
+    #[arg(long, default_value = "./tmp/api_sessions")]
+    tmp_dir: String,
+
     /// Directory with SvelteKit build for UI
     #[arg(long, default_value = "")]
     ui_dir: String,
@@ -133,6 +137,7 @@ async fn main() -> std::io::Result<()> {
         enhancer,
         landmark_detector,
         allowed_dirs,
+        cli.tmp_dir,
     ));
 
     let bind_address = format!("{}:{}", cli.host, cli.port);

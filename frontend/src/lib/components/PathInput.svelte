@@ -1,7 +1,7 @@
 <script>
 	import FileBrowser from './FileBrowser.svelte';
 
-	let { label, value, filterExtensions, storageKey = '', onchange } = $props();
+	let { label, value, filterExtensions = [], storageKey = '', onchange } = $props();
 
 	let browserOpen = $state(false);
 

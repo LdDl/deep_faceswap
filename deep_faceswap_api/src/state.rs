@@ -34,6 +34,7 @@ impl AppState {
         enhancer: Option<FaceEnhancer>,
         landmark_detector: Option<LandmarkDetector>,
         allowed_dirs: Vec<String>,
+        tmp_dir: String,
     ) -> Self {
         Self {
             models: ModelRegistry {
@@ -45,7 +46,7 @@ impl AppState {
             },
             jobs: Mutex::new(HashMap::new()),
             allowed_dirs,
-            tmp_dir: "./tmp/api_sessions".to_string(),
+            tmp_dir,
         }
     }
 
