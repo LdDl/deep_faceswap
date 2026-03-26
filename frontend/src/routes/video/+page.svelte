@@ -14,8 +14,18 @@
 	let sourcePaths = $state(['']);
 	let targetVideoPath = $state('');
 	let outputPath = $state('');
+	let tmpDir = $state('');
 	let enhance = $state(true);
 	let mouthMask = $state(false);
+
+	// Auto-generate tmp_dir from target video directory
+	$effect(() => {
+		if (targetVideoPath.trim()) {
+			const lastSlash = targetVideoPath.lastIndexOf('/');
+			const dir = lastSlash > 0 ? targetVideoPath.substring(0, lastSlash) : '.';
+			tmpDir = dir + '/tmp_frames';
+		}
+	});
 
 	/** @type {VideoAnalyzeResponse|null} */
 	let analysis = $state(null);
@@ -123,7 +133,7 @@
 		clusterMappings = [];
 
 		try {
-			analysis = await analyzeVideo(paths, targetVideoPath);
+			analysis = await analyzeVideo(paths, targetVideoPath, tmpDir || undefined);
 		} catch (e) {
 			error = e.error_text || e.message || 'Analysis failed';
 		} finally {
@@ -152,7 +162,8 @@
 				outputPath,
 				clusterMappings,
 				enhance,
-				mouthMask
+				mouthMask,
+				tmpDir || undefined
 			);
 
 			job = {
@@ -257,7 +268,17 @@
 		value={outputPath}
 		filterExtensions={videoExtensions}
 		storageKey="output_video"
+		saveMode={true}
+		defaultFilename="out.mp4"
 		onchange={(v) => (outputPath = v)}
+	/>
+
+	<!-- Temp directory -->
+	<PathInput
+		label="Temp directory (frames)"
+		value={tmpDir}
+		storageKey="tmp_dir_video"
+		onchange={(v) => (tmpDir = v)}
 	/>
 
 	<!-- Options -->

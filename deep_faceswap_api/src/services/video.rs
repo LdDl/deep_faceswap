@@ -2,28 +2,30 @@
 //! POST /api/video/analyze - Analyze video (detect faces, cluster)
 //! POST /api/swap/video - Start video swap job (async)
 
+use crate::error::ErrorResponse;
+use crate::jobs::{JobResult, JobState, JobStatus};
+use crate::services::detect::FaceInfo;
+use crate::state::AppState;
 use actix_web::{web, HttpRequest, HttpResponse};
-use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from_infos_to};
-use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
-use deep_faceswap_core::utils::{image as img_io, rgb};
-use deep_faceswap_core::video::{
-    build_cluster_info, build_face_lookup, cluster_faces, extract_frames, scan_frames_for_faces,
-};
 use deep_faceswap_core::alignment;
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
+use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from_infos_to};
 use deep_faceswap_core::swap::swap_video_frames_with_mappings;
+use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
+use deep_faceswap_core::utils::media::validate_output_path;
+use deep_faceswap_core::utils::{image as img_io, rgb};
 use deep_faceswap_core::video;
+use deep_faceswap_core::video::{
+    build_cluster_info, build_face_lookup, cluster_faces, extract_frames, load_face_records,
+    save_face_records, scan_frames_for_faces,
+};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+use std::time::Instant;
 use utoipa::ToSchema;
 use uuid::Uuid;
-use std::time::Instant;
-use std::path::Path;
-use std::fs;
-use crate::error::ErrorResponse;
-use crate::jobs::{JobProgress, JobResult, JobState, JobStatus};
-use crate::services::detect::FaceInfo;
-use crate::state::AppState;
 
 /// Cluster information from video analysis
 #[derive(Serialize, ToSchema)]
@@ -45,6 +47,9 @@ pub struct VideoAnalyzeRequest {
     /// Path to target video
     #[schema(example = "/home/user/video.mp4")]
     pub target_video_path: String,
+    /// Custom directory for temporary files (frames, crops). Falls back to server default.
+    #[serde(default)]
+    pub tmp_dir: Option<String>,
 }
 
 /// Video analysis response with source faces and target clusters
@@ -85,6 +90,9 @@ pub struct VideoSwapRequest {
     #[serde(default)]
     #[schema(example = false)]
     pub mouth_mask: bool,
+    /// Custom directory for temporary files. Falls back to server default.
+    #[serde(default)]
+    pub tmp_dir: Option<String>,
 }
 
 /// Video swap job creation response
@@ -122,7 +130,18 @@ pub async fn analyze_video(
     let result = tokio::task::spawn_blocking(move || {
         let start = Instant::now();
         let session_id = Uuid::new_v4().to_string()[..8].to_string();
-        let crop_base = format!("{}/{}", state.tmp_dir, session_id);
+        let base_tmp = req
+            .tmp_dir
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&state.tmp_dir);
+        let crop_base = format!("{}/{}", base_tmp, session_id);
+
+        // Remember which tmp_dir this session uses
+        {
+            let mut dirs = state.session_dirs.lock().unwrap();
+            dirs.insert(session_id.clone(), base_tmp.to_string());
+        }
 
         let mut detector = state.models.detector.lock().unwrap();
         let mut recognizer = state.models.recognizer.lock().unwrap();
@@ -167,8 +186,7 @@ pub async fn analyze_video(
 
         // Extract frames
         let frames_dir = format!("{}/video_frames", crop_base);
-        fs::create_dir_all(&frames_dir)
-            .map_err(|e| format!("Cannot create frames dir: {}", e))?;
+        fs::create_dir_all(&frames_dir).map_err(|e| format!("Cannot create frames dir: {}", e))?;
         let frame_paths = extract_frames(&req.target_video_path, &frames_dir)
             .map_err(|e| format!("Frame extraction failed: {}", e))?;
         let total_frames = frame_paths.len();
@@ -181,11 +199,15 @@ pub async fn analyze_video(
         let cluster_infos = build_cluster_info(&face_records, &centroids)
             .map_err(|e| format!("Cluster info failed: {}", e))?;
 
+        // Save face records for reuse during swap
+        let face_records_path = format!("{}/face_records.json", crop_base);
+        save_face_records(&face_records, &face_records_path)
+            .map_err(|e| format!("Failed to save face records: {}", e))?;
+
         // Save cluster crops
         let cluster_crop_dir = format!("{}/cluster", crop_base);
-        let cluster_crops =
-            save_cluster_crops_to(&cluster_infos, &frame_paths, &cluster_crop_dir)
-                .map_err(|e| format!("Failed to save cluster crops: {}", e))?;
+        let cluster_crops = save_cluster_crops_to(&cluster_infos, &frame_paths, &cluster_crop_dir)
+            .map_err(|e| format!("Failed to save cluster crops: {}", e))?;
 
         // Build response
         let source_face_infos: Vec<FaceInfo> = source_crops
@@ -260,7 +282,9 @@ pub async fn analyze_video(
                 error = err_msg.as_str(),
                 "Can't analyze video"
             );
-            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error_text: err_msg,
+            })
         }
     }
 }
@@ -286,6 +310,12 @@ pub async fn swap_video(
     let state = state.into_inner();
     let req = req.into_inner();
     let req_body = serde_json::to_string(&req).unwrap_or_default();
+
+    if let Err(e) = validate_output_path(&req.output_path, &req.target_video_path) {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: e.to_string(),
+        });
+    }
 
     let job_id = Uuid::new_v4().to_string()[..8].to_string();
 
@@ -321,18 +351,31 @@ pub async fn swap_video(
             // Conditionally disable enhancer/landmark per request
             let mut no_enhancer: Option<FaceEnhancer> = None;
             let mut no_landmark: Option<LandmarkDetector> = None;
-            let enhancer_ref: &mut Option<_> = if req.enhance { &mut *enhancer } else { &mut no_enhancer };
-            let landmark_ref: &mut Option<_> = if req.mouth_mask { &mut *landmark_detector } else { &mut no_landmark };
+            let enhancer_ref: &mut Option<_> = if req.enhance {
+                &mut *enhancer
+            } else {
+                &mut no_enhancer
+            };
+            let landmark_ref: &mut Option<_> = if req.mouth_mask {
+                &mut *landmark_detector
+            } else {
+                &mut no_landmark
+            };
 
-            let session_dir = format!("{}/{}", state_clone.tmp_dir, req.session_id);
+            let base_tmp = req
+                .tmp_dir
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(&state_clone.tmp_dir);
+            let session_dir = format!("{}/{}", base_tmp, req.session_id);
 
             // Load source images and detect faces
             let mut source_images = Vec::new();
             let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
 
             for (img_idx, path) in req.source_paths.iter().enumerate() {
-                let img = img_io::load_image(path)
-                    .map_err(|e| format!("Cannot load source: {}", e))?;
+                let img =
+                    img_io::load_image(path).map_err(|e| format!("Cannot load source: {}", e))?;
                 let rgb_img = img_io::to_rgb8(&img);
                 let array = rgb::rgb_to_array3(&rgb_img);
                 let faces = detector
@@ -362,9 +405,8 @@ pub async fn swap_video(
             let mut source_embeddings = Vec::new();
             for info in &all_source_faces {
                 let source_img = &source_images[info.source_image_index];
-                let aligned =
-                    alignment::align_face(source_img, &info.face, 112)
-                        .map_err(|e| format!("Alignment failed: {}", e))?;
+                let aligned = alignment::align_face(source_img, &info.face, 112)
+                    .map_err(|e| format!("Alignment failed: {}", e))?;
                 let embedding = recognizer
                     .extract_embedding(&aligned.aligned_image)
                     .map_err(|e| format!("Embedding failed: {}", e))?;
@@ -388,26 +430,10 @@ pub async fn swap_video(
                 frame_paths.push(entry.path().to_string_lossy().to_string());
             }
 
-            let total_frames = frame_paths.len();
-
-            // Update progress
-            {
-                let mut jobs = state_clone.jobs.lock().unwrap();
-                if let Some(job) = jobs.get_mut(&job_id_clone) {
-                    job.progress = JobProgress {
-                        stage: "scanning_faces".to_string(),
-                        current: 0,
-                        total: total_frames,
-                    };
-                }
-            }
-
-            // Scan frames and cluster
-            let mut face_records =
-                scan_frames_for_faces(&frame_paths, &mut detector, &mut recognizer)
-                    .map_err(|e| format!("Face scanning failed: {}", e))?;
-            let _centroids = cluster_faces(&mut face_records, 10)
-                .map_err(|e| format!("Clustering failed: {}", e))?;
+            // Load face records from analyze step (preserves cluster assignments)
+            let face_records_path = format!("{}/face_records.json", session_dir);
+            let face_records = load_face_records(&face_records_path)
+                .map_err(|e| format!("Failed to load face records: {}", e))?;
             let face_lookup = build_face_lookup(&face_records);
 
             // Update progress stage
@@ -453,12 +479,8 @@ pub async fn swap_video(
                 }
             }
 
-            video::encode_video(
-                &processed_dir,
-                &req.output_path,
-                &req.target_video_path,
-            )
-            .map_err(|e| format!("Video encoding failed: {}", e))?;
+            video::encode_video(&processed_dir, &req.output_path, &req.target_video_path)
+                .map_err(|e| format!("Video encoding failed: {}", e))?;
 
             // Cleanup processed frames
             let _ = fs::remove_dir_all(&processed_dir);

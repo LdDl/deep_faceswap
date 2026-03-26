@@ -2,7 +2,7 @@
 	import { request } from '$lib/api.js';
 	import { FileEntry } from '$lib/file_entry.js';
 
-	let { open, startPath = '/', filterExtensions, onSelect, onClose } = $props();
+	let { open, startPath = '/', filterExtensions, onSelect, onClose, saveMode = false, defaultFilename = '' } = $props();
 
 	let currentPath = $state('/');
 	let entries = $state([]);
@@ -12,6 +12,19 @@
 	let historyIndex = $state(-1);
 	let editingPath = $state(false);
 	let pathInputValue = $state('');
+	let filename = $state('');
+
+	// Initialize filename when opening in save mode
+	$effect(() => {
+		if (open && saveMode && defaultFilename && !filename) {
+			filename = defaultFilename;
+		}
+	});
+
+	// Check if filename already exists in current directory
+	let filenameExists = $derived(
+		saveMode && filename && entries.some((e) => !e.is_dir && e.name === filename)
+	);
 
 	$effect(() => {
 		if (open) {
@@ -86,10 +99,18 @@
 			} else {
 				loadDir(currentPath.replace(/\/$/, '') + '/' + entry.name);
 			}
+		} else if (saveMode) {
+			filename = entry.name;
 		} else {
 			const fullPath = currentPath.replace(/\/$/, '') + '/' + entry.name;
 			onSelect(fullPath);
 		}
+	}
+
+	function handleSave() {
+		if (!filename.trim()) return;
+		const fullPath = currentPath.replace(/\/$/, '') + '/' + filename.trim();
+		onSelect(fullPath);
 	}
 
 	/**
@@ -190,6 +211,30 @@
 					{/each}
 				{/if}
 			</div>
+
+			{#if saveMode}
+				<div class="px-4 py-3 border-t border-gray-700 flex flex-col gap-2">
+					<div class="flex items-center gap-2">
+						<span class="text-xs text-gray-400 shrink-0">File name:</span>
+						<input
+							type="text"
+							class="flex-1 bg-gray-700 text-gray-200 text-sm px-2 py-1 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+							bind:value={filename}
+							onkeydown={(e) => { if (e.key === 'Enter') handleSave(); }}
+						/>
+						<button
+							class="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:text-gray-400 text-sm text-white rounded"
+							disabled={!filename.trim()}
+							onclick={handleSave}
+						>
+							Save
+						</button>
+					</div>
+					{#if filenameExists}
+						<div class="text-xs text-yellow-400">File already exists and will be overwritten</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

@@ -1,17 +1,17 @@
 //! Route composition and OpenAPI documentation
 
-use actix_web::web;
 use actix_files as fs;
+use actix_web::web;
 use std::env;
 
-mod health;
-mod files;
-mod detect;
 mod crops;
-mod swap_image;
-mod video;
+mod detect;
+mod files;
+mod health;
 mod jobs;
 mod serve_file;
+mod swap_image;
+mod video;
 
 use utoipa::OpenApi;
 use utoipa_rapidoc::RapiDoc;
@@ -19,39 +19,26 @@ use utoipa_rapidoc::RapiDoc;
 pub fn init_routes(cfg: &mut web::ServiceConfig) {
     let ui_dir = env::var("UI_DIR").unwrap_or_default();
 
-    cfg
-        .service(
-            web::scope("/api")
-                .service(RapiDoc::with_openapi("/docs.json", ApiDoc::openapi()))
-                .service(RapiDoc::new("/api/docs.json").path("/docs"))
-                .route("/health", web::get().to(health::health))
-                .service(
-                    web::scope("/files")
-                        .route("", web::get().to(files::list_files))
-                )
-                .service(
-                    web::scope("/detect")
-                        .route("", web::post().to(detect::detect_faces))
-                )
-                .service(
-                    web::scope("/crops")
-                        .route("/{session_id}/{role}/{filename}", web::get().to(crops::serve_crop))
-                )
-                .service(
-                    web::scope("/swap")
-                        .route("/image", web::post().to(swap_image::swap_image))
-                        .route("/video", web::post().to(video::swap_video))
-                )
-                .service(
-                    web::scope("/video")
-                        .route("/analyze", web::post().to(video::analyze_video))
-                )
-                .service(
-                    web::scope("/jobs")
-                        .route("/{job_id}", web::get().to(jobs::get_job_status))
-                )
-                .route("/file", web::get().to(serve_file::serve_file))
-        );
+    cfg.service(
+        web::scope("/api")
+            .service(RapiDoc::with_openapi("/docs.json", ApiDoc::openapi()))
+            .service(RapiDoc::new("/api/docs.json").path("/docs"))
+            .route("/health", web::get().to(health::health))
+            .service(web::scope("/files").route("", web::get().to(files::list_files)))
+            .service(web::scope("/detect").route("", web::post().to(detect::detect_faces)))
+            .service(web::scope("/crops").route(
+                "/{session_id}/{role}/{filename}",
+                web::get().to(crops::serve_crop),
+            ))
+            .service(
+                web::scope("/swap")
+                    .route("/image", web::post().to(swap_image::swap_image))
+                    .route("/video", web::post().to(video::swap_video)),
+            )
+            .service(web::scope("/video").route("/analyze", web::post().to(video::analyze_video)))
+            .service(web::scope("/jobs").route("/{job_id}", web::get().to(jobs::get_job_status)))
+            .route("/file", web::get().to(serve_file::serve_file)),
+    );
 
     // Serve SvelteKit build if UI_DIR is set
     if !ui_dir.is_empty() {
@@ -61,10 +48,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
                 .default_handler(web::to(move || {
                     let ui_dir = env::var("UI_DIR").unwrap_or_default();
                     async move {
-                        actix_files::NamedFile::open_async(
-                            format!("{}/index.html", ui_dir),
-                        )
-                        .await
+                        actix_files::NamedFile::open_async(format!("{}/index.html", ui_dir)).await
                     }
                 })),
         );

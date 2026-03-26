@@ -155,10 +155,9 @@ pub fn paste_back_inplace(
     let (h, w, _) = target_img.dim();
 
     // Convert swapped face from normalized f32 to u8
-    let swapped_u8 = Array3::from_shape_fn(
-        (face_size_usize, face_size_usize, 3),
-        |(y, x, c)| (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8,
-    );
+    let swapped_u8 = Array3::from_shape_fn((face_size_usize, face_size_usize, 3), |(y, x, c)| {
+        (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
+    });
 
     // Compute face ROI by inverse-transforming aligned face corners to target image space
     let inv = invert_affine_transform(align_transform)?;
@@ -273,8 +272,7 @@ pub fn paste_back_inplace(
                     let swapped_val = warped_face[[y, x, ch]];
                     let original_val = target_img[[roi_y0 + y, roi_x0 + x, ch]] as f32;
                     let blended = alpha * swapped_val + (1.0 - alpha) * original_val;
-                    target_img[[roi_y0 + y, roi_x0 + x, ch]] =
-                        blended.clamp(0.0, 255.0) as u8;
+                    target_img[[roi_y0 + y, roi_x0 + x, ch]] = blended.clamp(0.0, 255.0) as u8;
                 }
             }
         }

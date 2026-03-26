@@ -6,7 +6,7 @@ use crate::types::{FaceSwapError, Result};
 /// Encode frames into video file
 ///
 /// # Arguments
-/// * `frames_dir` - Directory containing frame files (frame_000000.jpg, ....)
+/// * `frames_dir` - Directory containing frame files (frame_000000.png, ....)
 /// * `output_path` - Path for output video file
 /// * `original_video_path` - Path to original video (for audio and metadata)
 ///
@@ -66,7 +66,7 @@ fn get_video_metadata(video_path: &str) -> Result<(f64, bool)> {
 /// Encode frames to video using ffmpeg
 fn encode_frames_to_video(frames_dir: &str, output_path: &str, fps: f64) -> Result<()> {
     // Build ffmpeg command for encoding
-    let frame_pattern = format!("{}/frame_%06d.jpg", frames_dir);
+    let frame_pattern = format!("{}/frame_%06d.png", frames_dir);
 
     // Use std::process::Command to call ffmpeg CLI
     // This is simpler than using ffmpeg-next's encoder API for this use case

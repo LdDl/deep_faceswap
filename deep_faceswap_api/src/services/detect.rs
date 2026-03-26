@@ -4,14 +4,14 @@
 //! Unlike the CLI which has a --multi-face flag and falls back to highest-score,
 //! the API always exposes every face and lets the UI handle mapping.
 
+use crate::error::ErrorResponse;
+use crate::state::AppState;
 use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::multi_face::{save_face_crops_from_infos_to, save_face_crops_to};
 use deep_faceswap_core::types::{BBox, SourceFaceInfo};
 use deep_faceswap_core::utils::{image as img_io, rgb};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use crate::error::ErrorResponse;
-use crate::state::AppState;
 
 /// Face detection request
 #[derive(Deserialize, Serialize, ToSchema)]
@@ -228,7 +228,9 @@ pub async fn detect_faces(
                 error = err_msg.as_str(),
                 "Can't detect faces"
             );
-            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error_text: err_msg,
+            })
         }
     }
 }

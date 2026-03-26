@@ -41,13 +41,16 @@ export class VideoSwapResponse {
 /**
  * @param {string[]} sourcePaths
  * @param {string} targetVideoPath
+ * @param {string} [tmpDir]
  * @returns {Promise<VideoAnalyzeResponse>}
  */
-export const analyzeVideo = async (sourcePaths, targetVideoPath) => {
-	const data = await request('POST', '/video/analyze', {
+export const analyzeVideo = async (sourcePaths, targetVideoPath, tmpDir) => {
+	const body = {
 		source_paths: sourcePaths,
 		target_video_path: targetVideoPath
-	})
+	}
+	if (tmpDir) body.tmp_dir = tmpDir
+	const data = await request('POST', '/video/analyze', body)
 	return new VideoAnalyzeResponse(
 		data.session_id,
 		data.source_faces.map(FaceInfo.fromJSON),
@@ -65,10 +68,11 @@ export const analyzeVideo = async (sourcePaths, targetVideoPath) => {
  * @param {ClusterMapping[]} clusterMappings
  * @param {boolean} enhance
  * @param {boolean} mouthMask
+ * @param {string} [tmpDir]
  * @returns {Promise<VideoSwapResponse>}
  */
-export const swapVideo = async (sessionId, sourcePaths, targetVideoPath, outputPath, clusterMappings, enhance, mouthMask) => {
-	const data = await request('POST', '/swap/video', {
+export const swapVideo = async (sessionId, sourcePaths, targetVideoPath, outputPath, clusterMappings, enhance, mouthMask, tmpDir) => {
+	const body = {
 		session_id: sessionId,
 		source_paths: sourcePaths,
 		target_video_path: targetVideoPath,
@@ -76,6 +80,8 @@ export const swapVideo = async (sessionId, sourcePaths, targetVideoPath, outputP
 		cluster_mappings: clusterMappings,
 		enhance: enhance,
 		mouth_mask: mouthMask
-	})
+	}
+	if (tmpDir) body.tmp_dir = tmpDir
+	const data = await request('POST', '/swap/video', body)
 	return new VideoSwapResponse(data.job_id, data.status)
 }

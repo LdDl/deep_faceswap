@@ -3,7 +3,6 @@
 use crate::types::Result;
 use crate::verbose::{EVENT_LOAD_IMAGE, EVENT_SAVE_IMAGE};
 use crate::{log_additional, log_all, log_main};
-use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, RgbImage};
 
 /// Load image from file
@@ -27,15 +26,8 @@ pub fn save_image(img: &RgbImage, path: &str) -> Result<()> {
 
 /// Save image to file quietly
 /// Main purpose: for video frame processing, logs at trace level
-pub fn save_image_quiet(img: &RgbImage, path: &str, quality: Option<u8>) -> Result<()> {
+pub fn save_image_quiet(img: &RgbImage, path: &str) -> Result<()> {
     log_all!(EVENT_SAVE_IMAGE, "Saving image", path = path);
-    match quality {
-        Some(q) => {
-            let file = std::io::BufWriter::new(std::fs::File::create(path)?);
-            let mut encoder = JpegEncoder::new_with_quality(file, q);
-            encoder.encode_image(img)?;
-        }
-        None => img.save(path)?,
-    }
+    img.save(path)?;
     Ok(())
 }

@@ -1,10 +1,10 @@
 //! GET /api/files - Browse server filesystem
 
+use crate::error::ErrorResponse;
+use crate::state::AppState;
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
-use crate::error::ErrorResponse;
-use crate::state::AppState;
 
 /// File browser query
 #[derive(Deserialize, IntoParams)]
@@ -65,7 +65,9 @@ pub async fn list_files(
             error = err_msg.as_str(),
             "Can't list files"
         );
-        return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: err_msg,
+        });
     }
 
     let read_dir = match std::fs::read_dir(path) {
@@ -80,7 +82,9 @@ pub async fn list_files(
                 error = err_msg.as_str(),
                 "Can't list files"
             );
-            return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error_text: err_msg,
+            });
         }
     };
 
@@ -119,11 +123,7 @@ pub async fn list_files(
         let is_dir = metadata.is_dir();
         let size = if is_dir { None } else { Some(metadata.len()) };
 
-        entries.push(FileEntry {
-            name,
-            is_dir,
-            size,
-        });
+        entries.push(FileEntry { name, is_dir, size });
     }
 
     // Sort: directories first, then files, alphabetically within each group
