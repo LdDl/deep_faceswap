@@ -11,10 +11,10 @@ use clap::Parser;
 use deep_faceswap_core::detection::FaceDetector;
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
+use deep_faceswap_core::log_main;
 use deep_faceswap_core::recognition::FaceRecognizer;
 use deep_faceswap_core::swapper::FaceSwapper;
 use deep_faceswap_core::verbose::{set_verbose_level, VerboseLevel};
-use deep_faceswap_core::log_main;
 
 #[derive(Parser)]
 #[command(name = "deep-faceswap-api")]
@@ -107,7 +107,8 @@ async fn main() -> std::io::Result<()> {
             .unwrap_or_else(|e| panic!("Failed to load landmark model '{}': {}", path, e))
     });
 
-    let model_count = 3 + enhancer.as_ref().map_or(0, |_| 1) + landmark_detector.as_ref().map_or(0, |_| 1);
+    let model_count =
+        3 + enhancer.as_ref().map_or(0, |_| 1) + landmark_detector.as_ref().map_or(0, |_| 1);
     log_main!("startup", "All models loaded", count = model_count);
 
     // Parse allowed directories
@@ -123,7 +124,11 @@ async fn main() -> std::io::Result<()> {
 
     if !allowed_dirs.is_empty() {
         let dirs_str = allowed_dirs.join(", ");
-        log_main!("startup", "File browser restricted", dirs = dirs_str.as_str());
+        log_main!(
+            "startup",
+            "File browser restricted",
+            dirs = dirs_str.as_str()
+        );
     }
 
     if !cli.ui_dir.is_empty() {
@@ -141,7 +146,11 @@ async fn main() -> std::io::Result<()> {
     ));
 
     let bind_address = format!("{}:{}", cli.host, cli.port);
-    log_main!("startup", "Starting server", address = bind_address.as_str());
+    log_main!(
+        "startup",
+        "Starting server",
+        address = bind_address.as_str()
+    );
 
     HttpServer::new(move || {
         let cors = Cors::default()

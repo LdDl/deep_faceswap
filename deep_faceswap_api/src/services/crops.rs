@@ -1,8 +1,8 @@
 //! GET /api/crops/{session_id}/{role}/{filename} - Serve face crop images
 
-use actix_web::{web, HttpRequest, HttpResponse};
 use crate::error::ErrorResponse;
 use crate::state::AppState;
+use actix_web::{web, HttpRequest, HttpResponse};
 
 /// Serve a face crop image
 #[utoipa::path(
@@ -38,7 +38,9 @@ pub async fn serve_crop(
             error = err_msg.as_str(),
             "Can't serve crop"
         );
-        return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: err_msg,
+        });
     }
 
     // Prevent directory traversal
@@ -51,20 +53,22 @@ pub async fn serve_crop(
             error = err_msg.as_str(),
             "Can't serve crop"
         );
-        return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: err_msg,
+        });
     }
 
     // Look up session-specific tmp_dir, fall back to default
     let base_dir = {
         let dirs = state.session_dirs.lock().unwrap();
-        dirs.get(&session_id).cloned().unwrap_or_else(|| state.tmp_dir.clone())
+        dirs.get(&session_id)
+            .cloned()
+            .unwrap_or_else(|| state.tmp_dir.clone())
     };
     let file_path = format!("{}/{}/{}/{}", base_dir, session_id, role, filename);
 
     match std::fs::read(&file_path) {
-        Ok(data) => HttpResponse::Ok()
-            .content_type("image/jpeg")
-            .body(data),
+        Ok(data) => HttpResponse::Ok().content_type("image/jpeg").body(data),
         Err(_) => {
             let err_msg = format!("Crop not found: {}/{}/{}", session_id, role, filename);
             tracing::error!(
@@ -74,7 +78,9 @@ pub async fn serve_crop(
                 error = err_msg.as_str(),
                 "Can't serve crop"
             );
-            HttpResponse::NotFound().json(ErrorResponse { error_text: err_msg })
+            HttpResponse::NotFound().json(ErrorResponse {
+                error_text: err_msg,
+            })
         }
     }
 }

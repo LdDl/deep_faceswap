@@ -2,30 +2,30 @@
 //! POST /api/video/analyze - Analyze video (detect faces, cluster)
 //! POST /api/swap/video - Start video swap job (async)
 
-use actix_web::{web, HttpRequest, HttpResponse};
-use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from_infos_to};
-use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
-use deep_faceswap_core::utils::{image as img_io, rgb};
-use deep_faceswap_core::video::{
-    build_cluster_info, build_face_lookup, cluster_faces, extract_frames,
-    load_face_records, save_face_records, scan_frames_for_faces,
-};
-use deep_faceswap_core::alignment;
-use deep_faceswap_core::enhancer::FaceEnhancer;
-use deep_faceswap_core::landmark::LandmarkDetector;
-use deep_faceswap_core::swap::swap_video_frames_with_mappings;
-use deep_faceswap_core::video;
-use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
-use uuid::Uuid;
-use std::time::Instant;
-use std::path::Path;
-use std::fs;
-use deep_faceswap_core::utils::media::validate_output_path;
 use crate::error::ErrorResponse;
 use crate::jobs::{JobResult, JobState, JobStatus};
 use crate::services::detect::FaceInfo;
 use crate::state::AppState;
+use actix_web::{web, HttpRequest, HttpResponse};
+use deep_faceswap_core::alignment;
+use deep_faceswap_core::enhancer::FaceEnhancer;
+use deep_faceswap_core::landmark::LandmarkDetector;
+use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from_infos_to};
+use deep_faceswap_core::swap::swap_video_frames_with_mappings;
+use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
+use deep_faceswap_core::utils::media::validate_output_path;
+use deep_faceswap_core::utils::{image as img_io, rgb};
+use deep_faceswap_core::video;
+use deep_faceswap_core::video::{
+    build_cluster_info, build_face_lookup, cluster_faces, extract_frames, load_face_records,
+    save_face_records, scan_frames_for_faces,
+};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+use std::time::Instant;
+use utoipa::ToSchema;
+use uuid::Uuid;
 
 /// Cluster information from video analysis
 #[derive(Serialize, ToSchema)]
@@ -130,7 +130,9 @@ pub async fn analyze_video(
     let result = tokio::task::spawn_blocking(move || {
         let start = Instant::now();
         let session_id = Uuid::new_v4().to_string()[..8].to_string();
-        let base_tmp = req.tmp_dir.as_deref()
+        let base_tmp = req
+            .tmp_dir
+            .as_deref()
             .filter(|s| !s.is_empty())
             .unwrap_or(&state.tmp_dir);
         let crop_base = format!("{}/{}", base_tmp, session_id);
@@ -184,8 +186,7 @@ pub async fn analyze_video(
 
         // Extract frames
         let frames_dir = format!("{}/video_frames", crop_base);
-        fs::create_dir_all(&frames_dir)
-            .map_err(|e| format!("Cannot create frames dir: {}", e))?;
+        fs::create_dir_all(&frames_dir).map_err(|e| format!("Cannot create frames dir: {}", e))?;
         let frame_paths = extract_frames(&req.target_video_path, &frames_dir)
             .map_err(|e| format!("Frame extraction failed: {}", e))?;
         let total_frames = frame_paths.len();
@@ -205,9 +206,8 @@ pub async fn analyze_video(
 
         // Save cluster crops
         let cluster_crop_dir = format!("{}/cluster", crop_base);
-        let cluster_crops =
-            save_cluster_crops_to(&cluster_infos, &frame_paths, &cluster_crop_dir)
-                .map_err(|e| format!("Failed to save cluster crops: {}", e))?;
+        let cluster_crops = save_cluster_crops_to(&cluster_infos, &frame_paths, &cluster_crop_dir)
+            .map_err(|e| format!("Failed to save cluster crops: {}", e))?;
 
         // Build response
         let source_face_infos: Vec<FaceInfo> = source_crops
@@ -282,7 +282,9 @@ pub async fn analyze_video(
                 error = err_msg.as_str(),
                 "Can't analyze video"
             );
-            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error_text: err_msg,
+            })
         }
     }
 }
@@ -310,7 +312,9 @@ pub async fn swap_video(
     let req_body = serde_json::to_string(&req).unwrap_or_default();
 
     if let Err(e) = validate_output_path(&req.output_path, &req.target_video_path) {
-        return HttpResponse::BadRequest().json(ErrorResponse { error_text: e.to_string() });
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: e.to_string(),
+        });
     }
 
     let job_id = Uuid::new_v4().to_string()[..8].to_string();
@@ -347,10 +351,20 @@ pub async fn swap_video(
             // Conditionally disable enhancer/landmark per request
             let mut no_enhancer: Option<FaceEnhancer> = None;
             let mut no_landmark: Option<LandmarkDetector> = None;
-            let enhancer_ref: &mut Option<_> = if req.enhance { &mut *enhancer } else { &mut no_enhancer };
-            let landmark_ref: &mut Option<_> = if req.mouth_mask { &mut *landmark_detector } else { &mut no_landmark };
+            let enhancer_ref: &mut Option<_> = if req.enhance {
+                &mut *enhancer
+            } else {
+                &mut no_enhancer
+            };
+            let landmark_ref: &mut Option<_> = if req.mouth_mask {
+                &mut *landmark_detector
+            } else {
+                &mut no_landmark
+            };
 
-            let base_tmp = req.tmp_dir.as_deref()
+            let base_tmp = req
+                .tmp_dir
+                .as_deref()
                 .filter(|s| !s.is_empty())
                 .unwrap_or(&state_clone.tmp_dir);
             let session_dir = format!("{}/{}", base_tmp, req.session_id);
@@ -360,8 +374,8 @@ pub async fn swap_video(
             let mut all_source_faces: Vec<SourceFaceInfo> = Vec::new();
 
             for (img_idx, path) in req.source_paths.iter().enumerate() {
-                let img = img_io::load_image(path)
-                    .map_err(|e| format!("Cannot load source: {}", e))?;
+                let img =
+                    img_io::load_image(path).map_err(|e| format!("Cannot load source: {}", e))?;
                 let rgb_img = img_io::to_rgb8(&img);
                 let array = rgb::rgb_to_array3(&rgb_img);
                 let faces = detector
@@ -391,9 +405,8 @@ pub async fn swap_video(
             let mut source_embeddings = Vec::new();
             for info in &all_source_faces {
                 let source_img = &source_images[info.source_image_index];
-                let aligned =
-                    alignment::align_face(source_img, &info.face, 112)
-                        .map_err(|e| format!("Alignment failed: {}", e))?;
+                let aligned = alignment::align_face(source_img, &info.face, 112)
+                    .map_err(|e| format!("Alignment failed: {}", e))?;
                 let embedding = recognizer
                     .extract_embedding(&aligned.aligned_image)
                     .map_err(|e| format!("Embedding failed: {}", e))?;
@@ -466,12 +479,8 @@ pub async fn swap_video(
                 }
             }
 
-            video::encode_video(
-                &processed_dir,
-                &req.output_path,
-                &req.target_video_path,
-            )
-            .map_err(|e| format!("Video encoding failed: {}", e))?;
+            video::encode_video(&processed_dir, &req.output_path, &req.target_video_path)
+                .map_err(|e| format!("Video encoding failed: {}", e))?;
 
             // Cleanup processed frames
             let _ = fs::remove_dir_all(&processed_dir);

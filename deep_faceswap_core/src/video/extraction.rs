@@ -180,10 +180,9 @@ fn save_frame_as_png(
         pixels.extend_from_slice(&data[row_start..row_end]);
     }
 
-    let img: image::RgbImage =
-        image::ImageBuffer::from_raw(w, h, pixels).ok_or_else(|| {
-            FaceSwapError::ProcessingError("Failed to create image buffer".to_string())
-        })?;
+    let img: image::RgbImage = image::ImageBuffer::from_raw(w, h, pixels).ok_or_else(|| {
+        FaceSwapError::ProcessingError("Failed to create image buffer".to_string())
+    })?;
     img.save(output_path)?;
 
     Ok(())

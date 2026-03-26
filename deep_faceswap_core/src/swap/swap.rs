@@ -21,7 +21,6 @@ use std::collections::HashMap;
 use std::fs::create_dir_all;
 use std::time::Instant;
 
-
 /// Swap a single source face into a single target face
 ///
 /// # Arguments
@@ -68,12 +67,7 @@ pub fn swap_single_pair(
     let swapped_face = swapper.swap(&target_aligned.aligned_image, source_embedding)?;
 
     log_additional!(EVENT_PASTE_BACK, "Pasting swapped face back");
-    alignment::paste_back_inplace(
-        target_image,
-        &swapped_face,
-        &target_aligned.transform,
-        128,
-    )?;
+    alignment::paste_back_inplace(target_image, &swapped_face, &target_aligned.transform, 128)?;
 
     // Apply mouth mask after swap but before enhancement
     if let Some(ref data) = mouth_mask_data {
@@ -925,8 +919,7 @@ pub fn swap_video_frames_single(
             if reference_embedding.is_none() {
                 let first_face = &target_faces[0];
                 let aligned = alignment::align_face(&frame_array, first_face, 112)?;
-                reference_embedding =
-                    Some(recognizer.extract_embedding(&aligned.aligned_image)?);
+                reference_embedding = Some(recognizer.extract_embedding(&aligned.aligned_image)?);
             }
 
             if let Some(ref ref_emb) = reference_embedding {

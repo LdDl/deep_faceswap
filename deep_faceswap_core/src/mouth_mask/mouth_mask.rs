@@ -66,10 +66,7 @@ pub struct MouthMaskData {
 ///
 /// Returns the mask data needed to later apply the mouth blending after face swap.
 /// The mask is ROI-sized (only covers the mouth region, not the full frame).
-pub fn create_mouth_mask(
-    image: &Array3<u8>,
-    landmarks: &[[f32; 2]],
-) -> Result<MouthMaskData> {
+pub fn create_mouth_mask(image: &Array3<u8>, landmarks: &[[f32; 2]]) -> Result<MouthMaskData> {
     let (frame_h, frame_w, _) = image.dim();
 
     // Extract mouth polygon landmarks

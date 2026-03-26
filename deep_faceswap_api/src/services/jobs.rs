@@ -1,9 +1,9 @@
 //! GET /api/jobs/{job_id} - Poll job status
 
-use actix_web::{web, HttpRequest, HttpResponse};
 use crate::error::ErrorResponse;
 use crate::jobs::JobState;
 use crate::state::AppState;
+use actix_web::{web, HttpRequest, HttpResponse};
 
 /// Poll job status and progress
 #[utoipa::path(
@@ -39,7 +39,9 @@ pub async fn get_job_status(
                 error = err_msg.as_str(),
                 "Can't get job status"
             );
-            HttpResponse::NotFound().json(ErrorResponse { error_text: err_msg })
+            HttpResponse::NotFound().json(ErrorResponse {
+                error_text: err_msg,
+            })
         }
     }
 }

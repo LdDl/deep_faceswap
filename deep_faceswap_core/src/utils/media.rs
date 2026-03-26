@@ -2,9 +2,7 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v", ".mpg", ".mpeg",
 ];
 
-const IMAGE_EXTENSIONS: &[&str] = &[
-    ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff", ".tif",
-];
+const IMAGE_EXTENSIONS: &[&str] = &[".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff", ".tif"];
 
 pub fn is_video_file(path: &str) -> bool {
     let path_lower = path.to_lowercase();

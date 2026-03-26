@@ -1,5 +1,7 @@
 //! POST /api/swap/image - Execute face swap on still image
 
+use crate::error::ErrorResponse;
+use crate::state::AppState;
 use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
@@ -9,8 +11,6 @@ use deep_faceswap_core::utils::{image as img_io, rgb};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use utoipa::ToSchema;
-use crate::error::ErrorResponse;
-use crate::state::AppState;
 
 /// Image swap request with explicit face mappings
 #[derive(Deserialize, Serialize, ToSchema)]
@@ -80,8 +80,16 @@ pub async fn swap_image(
         // Conditionally disable enhancer/landmark per request
         let mut no_enhancer: Option<FaceEnhancer> = None;
         let mut no_landmark: Option<LandmarkDetector> = None;
-        let enhancer_ref: &mut Option<_> = if req.enhance { &mut *enhancer } else { &mut no_enhancer };
-        let landmark_ref: &mut Option<_> = if req.mouth_mask { &mut *landmark_detector } else { &mut no_landmark };
+        let enhancer_ref: &mut Option<_> = if req.enhance {
+            &mut *enhancer
+        } else {
+            &mut no_enhancer
+        };
+        let landmark_ref: &mut Option<_> = if req.mouth_mask {
+            &mut *landmark_detector
+        } else {
+            &mut no_landmark
+        };
 
         // Load and detect source faces
         let mut source_images = Vec::new();
@@ -199,7 +207,9 @@ pub async fn swap_image(
                 error = err_msg.as_str(),
                 "Can't swap image"
             );
-            HttpResponse::InternalServerError().json(ErrorResponse { error_text: err_msg })
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error_text: err_msg,
+            })
         }
     }
 }

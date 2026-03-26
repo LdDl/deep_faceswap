@@ -3,11 +3,11 @@
 //! Used for previewing source images, target images/videos, and swap results.
 //! Respects allowed_dirs security. Supports HTTP Range requests for video streaming.
 
+use crate::error::ErrorResponse;
+use crate::state::AppState;
 use actix_web::{web, HttpRequest, HttpResponse};
 use serde::Deserialize;
 use utoipa::IntoParams;
-use crate::error::ErrorResponse;
-use crate::state::AppState;
 
 #[derive(Deserialize, IntoParams)]
 pub struct FileQuery {
@@ -47,7 +47,9 @@ pub async fn serve_file(
             error = err_msg.as_str(),
             "Can't serve file"
         );
-        return Ok(HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg }));
+        return Ok(HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: err_msg,
+        }));
     }
 
     if !state.is_path_allowed(path) {
@@ -59,7 +61,9 @@ pub async fn serve_file(
             error = err_msg.as_str(),
             "Can't serve file"
         );
-        return Ok(HttpResponse::Forbidden().json(ErrorResponse { error_text: err_msg }));
+        return Ok(HttpResponse::Forbidden().json(ErrorResponse {
+            error_text: err_msg,
+        }));
     }
 
     // NamedFile handles Content-Type detection and Range requests automatically
