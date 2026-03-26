@@ -20,6 +20,7 @@ use uuid::Uuid;
 use std::time::Instant;
 use std::path::Path;
 use std::fs;
+use deep_faceswap_core::utils::media::validate_output_path;
 use crate::error::ErrorResponse;
 use crate::jobs::{JobProgress, JobResult, JobState, JobStatus};
 use crate::services::detect::FaceInfo;
@@ -295,6 +296,10 @@ pub async fn swap_video(
     let state = state.into_inner();
     let req = req.into_inner();
     let req_body = serde_json::to_string(&req).unwrap_or_default();
+
+    if let Err(e) = validate_output_path(&req.output_path, &req.target_video_path) {
+        return HttpResponse::BadRequest().json(ErrorResponse { error_text: e.to_string() });
+    }
 
     let job_id = Uuid::new_v4().to_string()[..8].to_string();
 
