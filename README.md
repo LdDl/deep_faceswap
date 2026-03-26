@@ -266,6 +266,7 @@ deep-faceswap-cli swap \
 - Downloaded models
 - Source and target images.
 - FFmpeg libraries (libavcodec, libavformat, etc.) for video processing
+- Node.js and npm for building the Web UI frontend (I've tested it with Node.js v22)
 - CUDA and cuDNN for GPU acceleration (optional, but recommended for better performance)
 
 ## Web UI and REST API
@@ -284,7 +285,30 @@ https://github.com/user-attachments/assets/b2293179-8e9b-4e58-aac8-7a8b78bebf2c
 
 > Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
 
-### Start the API server
+### Build
+
+Build the frontend and API server (with CUDA by default):
+
+```bash
+make frontend
+make api
+```
+
+Or build everything at once (frontend + API server + CLI):
+
+```bash
+make
+```
+
+For CPU-only build (without CUDA):
+
+```bash
+make CUDA=0
+# make api CUDA=0
+# make cli CUDA=0
+```
+
+### Run
 
 ```bash
 ./target/release/deep-faceswap-api \
@@ -297,17 +321,20 @@ https://github.com/user-attachments/assets/b2293179-8e9b-4e58-aac8-7a8b78bebf2c
   --landmark-model models/buffalo_l/2d106det.onnx
 ```
 
+Then open `http://localhost:36000` in your browser.
+
 The `--enhancer` and `--landmark-model` flags are optional. Without them, the enhance and mouth mask features will not be available in the UI.
 
-### Available options
+There is also a `make run` shortcut that builds everything and starts the server with default model paths.
 
-Most of the options are the same as CLI, but some are specific to the API server of course.
+### API server options
 
 | Flag | Default | Description |
 |---|---|---|
 | `--host` | `0.0.0.0` | Host to bind to |
 | `--port` | `36000` | Port to listen on |
 | `--ui-dir` | (none) | Path to SvelteKit build directory |
+| `--tmp-dir` | `./tmp/api_sessions` | Base directory for temporary files (frames, crops) |
 | `--detector` | `models/buffalo_l/det_10g.onnx` | Face detection model |
 | `--recognizer` | `models/buffalo_l/w600k_r50.onnx` | Face recognition model |
 | `--swapper` | `models/inswapper_128.onnx` | Face swapper model |
@@ -339,6 +366,7 @@ When built with the cuda feature, the tool will use CUDA for inference. If CUDA 
 ## Project structure
 
 @todo
+
 ## License
 
 @todo

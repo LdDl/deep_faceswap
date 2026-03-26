@@ -5,6 +5,14 @@ FRONTEND_BUILD = $(FRONTEND_DIR)/build
 API_BIN = target/release/deep-faceswap-api
 CLI_BIN = target/release/deep-faceswap-cli
 
+# Set CUDA=0 to build without CUDA (e.g. make CUDA=0)
+CUDA ?= 1
+ifeq ($(CUDA),1)
+  CARGO_FEATURES = --features cuda
+else
+  CARGO_FEATURES =
+endif
+
 # Build everything: frontend first, then Rust binaries
 all: frontend api cli
 
@@ -14,16 +22,16 @@ frontend:
 	cd $(FRONTEND_DIR) && npm install && npm run build
 	@echo "Frontend built: $(FRONTEND_BUILD)/"
 
-# Build API server (release, with CUDA)
+# Build API server (release)
 api:
 	@echo "Building API server..."
-	cargo build --release --features cuda -p deep_faceswap_api
+	cargo build --release $(CARGO_FEATURES) -p deep_faceswap_api
 	@echo "API built: $(API_BIN)"
 
-# Build CLI tool (release, with CUDA)
+# Build CLI tool (release)
 cli:
 	@echo "Building CLI..."
-	cargo build --release --features cuda -p deep_faceswap_cli
+	cargo build --release $(CARGO_FEATURES) -p deep_faceswap_cli
 	@echo "CLI built: $(CLI_BIN)"
 
 # Run API server with embedded frontend
