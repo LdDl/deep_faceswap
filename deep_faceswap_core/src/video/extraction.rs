@@ -9,7 +9,7 @@ use std::path::Path;
 ///
 /// # Arguments
 /// * `video_path` - Path to input video file
-/// * `output_dir` - Directory where frames will be saved
+/// * `output_dir` - Directory where frames will be saved as PNG
 ///
 /// # Returns
 /// Vector of paths to extracted frame files (sorted by frame number)
@@ -77,10 +77,9 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
     let mut frame_count = 0;
     let mut saved_frames: Vec<String> = Vec::new();
 
-    // Scaler and MJPEG encoder initialized on first frame
+    // Scaler initialized on first frame (converts to RGB24 for PNG)
     let mut scaler: Option<ffmpeg_next::software::scaling::context::Context> = None;
-    let mut jpeg_encoder: Option<ffmpeg_next::encoder::Video> = None;
-    let mut yuvj_frame = ffmpeg_next::util::frame::video::Video::empty();
+    let mut rgb_frame = ffmpeg_next::util::frame::video::Video::empty();
 
     // Process packets
     for (stream, packet) in input_ctx.packets() {
@@ -91,7 +90,6 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
 
             let mut decoded_frame = ffmpeg_next::util::frame::video::Video::empty();
             while decoder.receive_frame(&mut decoded_frame).is_ok() {
-                // Initialize scaler and encoder on first frame
                 if scaler.is_none() {
                     let w = decoded_frame.width();
                     let h = decoded_frame.height();
@@ -101,7 +99,7 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
                             decoded_frame.format(),
                             w,
                             h,
-                            ffmpeg_next::format::Pixel::YUVJ420P,
+                            ffmpeg_next::format::Pixel::RGB24,
                             w,
                             h,
                             ffmpeg_next::software::scaling::flag::Flags::BILINEAR,
@@ -113,41 +111,14 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
                             ))
                         })?,
                     );
-
-                    // Create MJPEG encoder
-                    let mjpeg_codec = ffmpeg_next::encoder::find(ffmpeg_next::codec::Id::MJPEG)
-                        .ok_or_else(|| {
-                            FaceSwapError::ProcessingError("MJPEG encoder not found".to_string())
-                        })?;
-                    let enc_ctx = ffmpeg_next::codec::context::Context::new_with_codec(mjpeg_codec);
-                    let mut enc_params = enc_ctx.encoder().video().map_err(|e| {
-                        FaceSwapError::ProcessingError(format!(
-                            "Failed to create MJPEG encoder: {}",
-                            e
-                        ))
-                    })?;
-                    enc_params.set_width(w);
-                    enc_params.set_height(h);
-                    enc_params.set_format(ffmpeg_next::format::Pixel::YUVJ420P);
-                    enc_params.set_time_base(ffmpeg_next::Rational::new(1, 25));
-                    enc_params.set_quality(2);
-
-                    let encoder = enc_params.open().map_err(|e| {
-                        FaceSwapError::ProcessingError(format!(
-                            "Failed to open MJPEG encoder: {}",
-                            e
-                        ))
-                    })?;
-                    jpeg_encoder = Some(encoder);
                 }
 
-                let frame_path = format!("{}/frame_{:06}.jpg", output_dir, frame_count);
-                encode_frame_as_jpeg(
+                let frame_path = format!("{}/frame_{:06}.png", output_dir, frame_count);
+                save_frame_as_png(
                     &decoded_frame,
                     &frame_path,
                     scaler.as_mut().unwrap(),
-                    jpeg_encoder.as_mut().unwrap(),
-                    &mut yuvj_frame,
+                    &mut rgb_frame,
                 )?;
                 saved_frames.push(frame_path);
 
@@ -171,13 +142,12 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
 
     let mut decoded_frame = ffmpeg_next::util::frame::video::Video::empty();
     while decoder.receive_frame(&mut decoded_frame).is_ok() {
-        let frame_path = format!("{}/frame_{:06}.jpg", output_dir, frame_count);
-        encode_frame_as_jpeg(
+        let frame_path = format!("{}/frame_{:06}.png", output_dir, frame_count);
+        save_frame_as_png(
             &decoded_frame,
             &frame_path,
             scaler.as_mut().unwrap(),
-            jpeg_encoder.as_mut().unwrap(),
-            &mut yuvj_frame,
+            &mut rgb_frame,
         )?;
         saved_frames.push(frame_path);
         frame_count += 1;
@@ -186,30 +156,34 @@ pub fn extract_frames(video_path: &str, output_dir: &str) -> Result<Vec<String>>
     Ok(saved_frames)
 }
 
-/// Encode a video frame as JPEG using ffmpeg MJPEG encoder
-fn encode_frame_as_jpeg(
+/// Convert a video frame to RGB24 and save as PNG
+fn save_frame_as_png(
     frame: &ffmpeg_next::util::frame::video::Video,
     output_path: &str,
     scaler: &mut ffmpeg_next::software::scaling::context::Context,
-    encoder: &mut ffmpeg_next::encoder::Video,
-    yuvj_frame: &mut ffmpeg_next::util::frame::video::Video,
+    rgb_frame: &mut ffmpeg_next::util::frame::video::Video,
 ) -> Result<()> {
-    // Convert to YUVJ420P for MJPEG encoder
     scaler
-        .run(frame, yuvj_frame)
+        .run(frame, rgb_frame)
         .map_err(|e| FaceSwapError::ProcessingError(format!("Failed to scale frame: {}", e)))?;
 
-    // Encode frame
-    encoder.send_frame(yuvj_frame).map_err(|e| {
-        FaceSwapError::ProcessingError(format!("Failed to send frame to encoder: {}", e))
-    })?;
+    let w = rgb_frame.width();
+    let h = rgb_frame.height();
+    let stride = rgb_frame.stride(0);
+    let data = rgb_frame.data(0);
 
-    let mut packet = ffmpeg_next::Packet::empty();
-    if encoder.receive_packet(&mut packet).is_ok() {
-        if let Some(data) = packet.data() {
-            std::fs::write(output_path, data)?;
-        }
+    // RGB24 data may have padding per row (stride > width*3)
+    let mut pixels = Vec::with_capacity((w * h * 3) as usize);
+    for y in 0..h as usize {
+        let row_start = y * stride;
+        let row_end = row_start + (w as usize * 3);
+        pixels.extend_from_slice(&data[row_start..row_end]);
     }
+
+    let img: image::RgbImage = image::ImageBuffer::from_raw(w, h, pixels).ok_or_else(|| {
+        FaceSwapError::ProcessingError("Failed to create image buffer".to_string())
+    })?;
+    img.save(output_path)?;
 
     Ok(())
 }

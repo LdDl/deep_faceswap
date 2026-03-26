@@ -17,10 +17,11 @@ use crate::types::{DetectedFace, FaceSwapError, Result};
 use crate::utils::{image as img_io, rgb};
 use crate::{log_additional, log_main};
 use ndarray::{Array1, Array2};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Single face detected in a video frame, with its embedding and cluster assignment
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FaceRecord {
     /// Index of the frame where this face was detected
     pub frame_idx: usize,
@@ -273,4 +274,22 @@ pub fn build_face_lookup(
     }
 
     lookup
+}
+
+/// Save face records to a JSON file
+pub fn save_face_records(face_records: &[FaceRecord], path: &str) -> Result<()> {
+    let json = serde_json::to_vec(face_records).map_err(|e| {
+        FaceSwapError::ProcessingError(format!("Failed to serialize face records: {}", e))
+    })?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+/// Load face records from a JSON file
+pub fn load_face_records(path: &str) -> Result<Vec<FaceRecord>> {
+    let data = std::fs::read(path)?;
+    let records: Vec<FaceRecord> = serde_json::from_slice(&data).map_err(|e| {
+        FaceSwapError::ProcessingError(format!("Failed to deserialize face records: {}", e))
+    })?;
+    Ok(records)
 }

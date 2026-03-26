@@ -1,5 +1,6 @@
 //! Core types for face swapping
 
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Custom error type for face swap operations
@@ -80,7 +81,8 @@ impl From<ort::Error> for FaceSwapError {
 pub type Result<T> = std::result::Result<T, FaceSwapError>;
 
 /// Bounding box in [x1, y1, x2, y2] format
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct BBox {
     pub x1: f32,
     pub y1: f32,
@@ -93,7 +95,7 @@ pub struct BBox {
 ///
 /// Contains bounding box, facial landmarks, and detection confidence score.
 /// The landmarks follow the 5-point format used by InsightFace models.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedFace {
     /// Face bounding box in original image coordinates
     pub bbox: BBox,
@@ -135,7 +137,7 @@ pub struct AlignedFace {
 ///
 /// Contains a detected face and the path where its cropped image was saved.
 /// Used during interactive face selection to let users visually identify faces.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FaceCropInfo {
     /// The detected face with bbox and landmarks
     pub face: DetectedFace,
@@ -151,7 +153,8 @@ pub struct FaceCropInfo {
 ///
 /// Specifies which source face should be swapped onto which target face.
 /// Indices correspond to detection order (sorted by score, descending).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct FaceMapping {
     /// Index of source face (0-based)
     pub source_idx: usize,
@@ -164,7 +167,7 @@ pub struct FaceMapping {
 ///
 /// When multiple source images are provided, this tracks which image
 /// each face came from, along with the face data itself.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceFaceInfo {
     /// The detected face with bbox and landmarks
     pub face: DetectedFace,
@@ -180,7 +183,8 @@ pub struct SourceFaceInfo {
 ///
 /// Specifies which source face should be swapped onto which face cluster.
 /// Used for video processing where faces are clustered across frames.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ClusterMapping {
     /// Index of source face (0-based)
     pub source_idx: usize,
@@ -192,7 +196,7 @@ pub struct ClusterMapping {
 /// Crop information for cluster example faces
 ///
 /// Similar to FaceCropInfo but includes cluster metadata for display
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterCropInfo {
     /// The example face from this cluster
     pub face: DetectedFace,

@@ -121,11 +121,8 @@ pub fn rgb_to_array3(img: &RgbImage) -> Array3<u8> {
     // RgbImage stores pixels as [R,G,B,R,G,B,...] in row-major order.
     // Array3<u8> with shape (H,W,3) in standard layout has identical memory layout.
     // Single bulk copy instead of H*W individual get_pixel calls.
-    Array3::from_shape_vec(
-        (height as usize, width as usize, 3),
-        img.as_raw().clone(),
-    )
-    .expect("RgbImage raw buffer size must match H*W*3")
+    Array3::from_shape_vec((height as usize, width as usize, 3), img.as_raw().clone())
+        .expect("RgbImage raw buffer size must match H*W*3")
 }
 
 /// Convert Array3<u8> (HWC format) to RgbImage
@@ -160,6 +157,5 @@ pub fn array3_to_rgb(array: &Array3<u8>) -> RgbImage {
         array.iter().cloned().collect()
     };
 
-    RgbImage::from_raw(w as u32, h as u32, data)
-        .expect("Array3 data size must match W*H*3")
+    RgbImage::from_raw(w as u32, h as u32, data).expect("Array3 data size must match W*H*3")
 }
