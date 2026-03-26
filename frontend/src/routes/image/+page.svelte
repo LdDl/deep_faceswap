@@ -167,6 +167,8 @@
 		value={outputPath}
 		filterExtensions={imageExtensions}
 		storageKey="output"
+		saveMode={true}
+		defaultFilename="out.jpg"
 		onchange={(v) => (outputPath = v)}
 	/>
 

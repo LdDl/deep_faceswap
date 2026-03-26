@@ -268,6 +268,8 @@
 		value={outputPath}
 		filterExtensions={videoExtensions}
 		storageKey="output_video"
+		saveMode={true}
+		defaultFilename="out.mp4"
 		onchange={(v) => (outputPath = v)}
 	/>
 

@@ -272,6 +272,18 @@ deep-faceswap-cli swap \
 
 The project includes a web-based interface built with SvelteKit + Tailwind CSS, served by an actix-web REST API server. It provides the same capabilities as the CLI but with a visual interface for face mapping and progress tracking.
 
+### Showcase
+
+| Image swap |
+:---:
+https://github.com/user-attachments/assets/b1069d2c-5dfa-4363-99ba-8fe855ce3b97
+
+| Video swap |
+:---:
+https://github.com/user-attachments/assets/b2293179-8e9b-4e58-aac8-7a8b78bebf2c
+
+> Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
+
 ### Start the API server
 
 ```bash

@@ -7,7 +7,8 @@ use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from
 use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
 use deep_faceswap_core::utils::{image as img_io, rgb};
 use deep_faceswap_core::video::{
-    build_cluster_info, build_face_lookup, cluster_faces, extract_frames, scan_frames_for_faces,
+    build_cluster_info, build_face_lookup, cluster_faces, extract_frames,
+    load_face_records, save_face_records, scan_frames_for_faces,
 };
 use deep_faceswap_core::alignment;
 use deep_faceswap_core::enhancer::FaceEnhancer;
@@ -22,7 +23,7 @@ use std::path::Path;
 use std::fs;
 use deep_faceswap_core::utils::media::validate_output_path;
 use crate::error::ErrorResponse;
-use crate::jobs::{JobProgress, JobResult, JobState, JobStatus};
+use crate::jobs::{JobResult, JobState, JobStatus};
 use crate::services::detect::FaceInfo;
 use crate::state::AppState;
 
@@ -134,6 +135,12 @@ pub async fn analyze_video(
             .unwrap_or(&state.tmp_dir);
         let crop_base = format!("{}/{}", base_tmp, session_id);
 
+        // Remember which tmp_dir this session uses
+        {
+            let mut dirs = state.session_dirs.lock().unwrap();
+            dirs.insert(session_id.clone(), base_tmp.to_string());
+        }
+
         let mut detector = state.models.detector.lock().unwrap();
         let mut recognizer = state.models.recognizer.lock().unwrap();
 
@@ -190,6 +197,11 @@ pub async fn analyze_video(
             .map_err(|e| format!("Clustering failed: {}", e))?;
         let cluster_infos = build_cluster_info(&face_records, &centroids)
             .map_err(|e| format!("Cluster info failed: {}", e))?;
+
+        // Save face records for reuse during swap
+        let face_records_path = format!("{}/face_records.json", crop_base);
+        save_face_records(&face_records, &face_records_path)
+            .map_err(|e| format!("Failed to save face records: {}", e))?;
 
         // Save cluster crops
         let cluster_crop_dir = format!("{}/cluster", crop_base);
@@ -405,26 +417,10 @@ pub async fn swap_video(
                 frame_paths.push(entry.path().to_string_lossy().to_string());
             }
 
-            let total_frames = frame_paths.len();
-
-            // Update progress
-            {
-                let mut jobs = state_clone.jobs.lock().unwrap();
-                if let Some(job) = jobs.get_mut(&job_id_clone) {
-                    job.progress = JobProgress {
-                        stage: "scanning_faces".to_string(),
-                        current: 0,
-                        total: total_frames,
-                    };
-                }
-            }
-
-            // Scan frames and cluster
-            let mut face_records =
-                scan_frames_for_faces(&frame_paths, &mut detector, &mut recognizer)
-                    .map_err(|e| format!("Face scanning failed: {}", e))?;
-            let _centroids = cluster_faces(&mut face_records, 10)
-                .map_err(|e| format!("Clustering failed: {}", e))?;
+            // Load face records from analyze step (preserves cluster assignments)
+            let face_records_path = format!("{}/face_records.json", session_dir);
+            let face_records = load_face_records(&face_records_path)
+                .map_err(|e| format!("Failed to load face records: {}", e))?;
             let face_lookup = build_face_lookup(&face_records);
 
             // Update progress stage

@@ -54,7 +54,12 @@ pub async fn serve_crop(
         return HttpResponse::BadRequest().json(ErrorResponse { error_text: err_msg });
     }
 
-    let file_path = format!("{}/{}/{}/{}", state.tmp_dir, session_id, role, filename);
+    // Look up session-specific tmp_dir, fall back to default
+    let base_dir = {
+        let dirs = state.session_dirs.lock().unwrap();
+        dirs.get(&session_id).cloned().unwrap_or_else(|| state.tmp_dir.clone())
+    };
+    let file_path = format!("{}/{}/{}/{}", base_dir, session_id, role, filename);
 
     match std::fs::read(&file_path) {
         Ok(data) => HttpResponse::Ok()

@@ -24,6 +24,8 @@ pub struct AppState {
     pub jobs: Mutex<HashMap<String, JobState>>,
     pub allowed_dirs: Vec<String>,
     pub tmp_dir: String,
+    /// Maps session_id -> base tmp_dir used for that session
+    pub session_dirs: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
@@ -47,6 +49,7 @@ impl AppState {
             jobs: Mutex::new(HashMap::new()),
             allowed_dirs,
             tmp_dir,
+            session_dirs: Mutex::new(HashMap::new()),
         }
     }
 

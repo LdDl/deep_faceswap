@@ -1,7 +1,7 @@
 <script>
 	import FileBrowser from './FileBrowser.svelte';
 
-	let { label, value, filterExtensions = [], storageKey = '', onchange } = $props();
+	let { label, value, filterExtensions = [], storageKey = '', onchange, saveMode = false, defaultFilename = '' } = $props();
 
 	let browserOpen = $state(false);
 
@@ -50,6 +50,8 @@
 	open={browserOpen}
 	startPath={startPath()}
 	{filterExtensions}
+	{saveMode}
+	{defaultFilename}
 	onSelect={handleSelect}
 	onClose={() => (browserOpen = false)}
 />
