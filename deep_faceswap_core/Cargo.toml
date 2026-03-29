@@ -8,6 +8,7 @@ license.workspace = true
 [features]
 default = []
 cuda = ["ort/cuda"]
+utoipa = ["dep:utoipa"]
 
 [dependencies]
 # Image processing
@@ -29,6 +30,9 @@ ffmpeg-next.workspace = true
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
+
+# OpenAPI (optional, for API crate)
+utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]
 approx = "0.5"  # For float comparisons in tests

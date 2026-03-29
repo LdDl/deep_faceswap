@@ -6,6 +6,7 @@ Rust implementation of face swapping. Basically a port of [Deep-Live-Cam](https:
 - [Work in progress](#work-in-progress)
 - [Quick start](#quick-start)
 - [CLI usage](#cli-usage)
+- [Web UI and REST API](#web-ui-and-rest-api)
 - [CUDA support](#cuda-support)
 - [Project structure](#project-structure)
 - [License](#license)
@@ -23,10 +24,10 @@ Current:
 - Multi-face support with interactive mapping (images and video)
 - CUDA acceleration support via ONNX Runtime
 - ROI-based paste_back for high-resolution images (~50-100x faster on 4K, ~3.7x end-to-end on 720p video)
+- REST API server (actix-web) with interactive API docs
+- Web UI (SvelteKit + Tailwind CSS) for image and video face swapping
 
 Planned:
-- Basic REST API: server-side processing, no file uploads - videos are already on the server; uploading feature could be added later, but what is a purpose if software intended for local use?
-- Basic web UI for the REST API. I am thinking of SvelteKit + Tailwind, but it will be very basic and minimalistic and cover just CLI capabilities.
 - Online video (low priority)
 
 ## Quick start
@@ -265,7 +266,86 @@ deep-faceswap-cli swap \
 - Downloaded models
 - Source and target images.
 - FFmpeg libraries (libavcodec, libavformat, etc.) for video processing
+- Node.js and npm for building the Web UI frontend (I've tested it with Node.js v22)
 - CUDA and cuDNN for GPU acceleration (optional, but recommended for better performance)
+
+## Web UI and REST API
+
+The project includes a web-based interface built with SvelteKit + Tailwind CSS, served by an actix-web REST API server. It provides the same capabilities as the CLI but with a visual interface for face mapping and progress tracking.
+
+### Showcase
+
+| Image swap |
+:---:
+https://github.com/user-attachments/assets/b1069d2c-5dfa-4363-99ba-8fe855ce3b97
+
+| Video swap |
+:---:
+https://github.com/user-attachments/assets/b2293179-8e9b-4e58-aac8-7a8b78bebf2c
+
+> Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
+
+### Build
+
+Build the frontend and API server (with CUDA by default):
+
+```bash
+make frontend
+make api
+```
+
+Or build everything at once (frontend + API server + CLI):
+
+```bash
+make
+```
+
+For CPU-only build (without CUDA):
+
+```bash
+make CUDA=0
+# make api CUDA=0
+# make cli CUDA=0
+```
+
+### Run
+
+```bash
+./target/release/deep-faceswap-api \
+  --port 36000 \
+  --ui-dir ./frontend/build \
+  --detector models/buffalo_l/det_10g.onnx \
+  --recognizer models/buffalo_l/w600k_r50.onnx \
+  --swapper models/inswapper_128.onnx \
+  --enhancer models/GFPGANv1.4.onnx \
+  --landmark-model models/buffalo_l/2d106det.onnx
+```
+
+Then open `http://localhost:36000` in your browser.
+
+The `--enhancer` and `--landmark-model` flags are optional. Without them, the enhance and mouth mask features will not be available in the UI.
+
+There is also a `make run` shortcut that builds everything and starts the server with default model paths.
+
+### API server options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--host` | `0.0.0.0` | Host to bind to |
+| `--port` | `36000` | Port to listen on |
+| `--ui-dir` | (none) | Path to SvelteKit build directory |
+| `--tmp-dir` | `./tmp/api_sessions` | Base directory for temporary files (frames, crops) |
+| `--detector` | `models/buffalo_l/det_10g.onnx` | Face detection model |
+| `--recognizer` | `models/buffalo_l/w600k_r50.onnx` | Face recognition model |
+| `--swapper` | `models/inswapper_128.onnx` | Face swapper model |
+| `--enhancer` | (none) | GFPGAN enhancement model |
+| `--landmark-model` | (none) | 106-point landmark model for mouth mask |
+| `--allowed-dir` | (all) | Comma-separated directories the file browser can access |
+| `-v, --verbose` | `1` | Verbose level: 0 (errors), 1 (main), 2 (details), 3 (all) |
+
+### API documentation
+
+When the server is running, interactive API docs are available at `http://localhost:36000/api/docs`.
 
 ## CUDA support
 
@@ -286,6 +366,7 @@ When built with the cuda feature, the tool will use CUDA for inference. If CUDA 
 ## Project structure
 
 @todo
+
 ## License
 
 @todo

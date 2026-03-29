@@ -1,20 +1,7 @@
 use clap::Parser;
+use deep_faceswap_core::utils::media::{is_video_file, validate_output_path};
 use deep_faceswap_core::verbose::{set_verbose_level, VerboseLevel};
 use deep_faceswap_core::Result;
-
-fn is_video_file(path: &str) -> bool {
-    let path_lower = path.to_lowercase();
-    path_lower.ends_with(".mp4")
-        || path_lower.ends_with(".avi")
-        || path_lower.ends_with(".mov")
-        || path_lower.ends_with(".mkv")
-        || path_lower.ends_with(".webm")
-        || path_lower.ends_with(".flv")
-        || path_lower.ends_with(".wmv")
-        || path_lower.ends_with(".m4v")
-        || path_lower.ends_with(".mpg")
-        || path_lower.ends_with(".mpeg")
-}
 
 #[derive(Parser)]
 #[command(name = "deep-faceswap")]
@@ -114,6 +101,8 @@ fn main() -> Result<()> {
             multi_face,
             video_tmp_dir,
         } => {
+            validate_output_path(&output, &target)?;
+
             let enhancer_model = if enhance {
                 Some(enhancer.as_str())
             } else {
