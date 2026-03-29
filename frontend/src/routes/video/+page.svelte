@@ -1,10 +1,12 @@
 <script>
-	import { onMount, onDestroy } from 'svelte';
+	import { tick, onMount, onDestroy } from 'svelte';
+	import SourcePathList from '$lib/components/SourcePathList.svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
 	import MediaPreview from '$lib/components/MediaPreview.svelte';
 	import FaceMapper from '$lib/components/FaceMapper.svelte';
 	import OptionsBar from '$lib/components/OptionsBar.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
+	import StepIndicator from '$lib/components/StepIndicator.svelte';
 	import { analyzeVideo, swapVideo } from '$lib/stores/video.js';
 	import { getJobStatus } from '$lib/stores/jobs.js';
 	import { ClusterMapping } from '$lib/cluster_mapping.js';
@@ -17,6 +19,7 @@
 	let tmpDir = $state('');
 	let enhance = $state(true);
 	let mouthMask = $state(false);
+	let advancedOpen = $state(false);
 
 	// Auto-generate tmp_dir from target video directory
 	$effect(() => {
@@ -41,7 +44,29 @@
 	/** @type {ReturnType<typeof setInterval>|null} */
 	let pollTimer = null;
 
+	/** @type {HTMLElement|undefined} */
+	let mappingSection = $state();
+	/** @type {HTMLElement|undefined} */
+	let resultSection = $state();
+
 	const ACTIVE_JOB_KEY = 'video_active_job';
+
+	const steps = [
+		{ label: 'Setup' },
+		{ label: 'Analyze' },
+		{ label: 'Map' },
+		{ label: 'Swap' },
+		{ label: 'Result' }
+	];
+
+	let currentStep = $derived.by(() => {
+		if (job?.status === 'completed') return 4;
+		if (job?.status === 'running' || job?.status === 'queued' || starting) return 3;
+		if (analysis && clusterMappings.length > 0) return 3;
+		if (analysis) return 2;
+		if (analyzing) return 1;
+		return 0;
+	});
 
 	/**
 	 * Save active job info to localStorage for session recovery.
@@ -49,10 +74,13 @@
 	 * @param {string} outPath
 	 */
 	function saveActiveJob(jobId, outPath) {
-		localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({
-			job_id: jobId,
-			output_path: outPath,
-		}));
+		localStorage.setItem(
+			ACTIVE_JOB_KEY,
+			JSON.stringify({
+				job_id: jobId,
+				output_path: outPath
+			})
+		);
 	}
 
 	function clearActiveJob() {
@@ -91,6 +119,15 @@
 		}
 	});
 
+	// Auto-scroll to result when job completes
+	$effect(() => {
+		if (job?.status === 'completed') {
+			tick().then(() => {
+				resultSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			});
+		}
+	});
+
 	onMount(() => {
 		tryRecoverJob();
 	});
@@ -101,23 +138,6 @@
 			pollTimer = null;
 		}
 	});
-
-	function addSourcePath() {
-		sourcePaths = [...sourcePaths, ''];
-	}
-
-	/** @param {number} index */
-	function removeSourcePath(index) {
-		sourcePaths = sourcePaths.filter((_, i) => i !== index);
-	}
-
-	/**
-	 * @param {number} index
-	 * @param {string} value
-	 */
-	function updateSourcePath(index, value) {
-		sourcePaths[index] = value;
-	}
 
 	async function handleAnalyze() {
 		const paths = sourcePaths.filter((p) => p.trim());
@@ -134,7 +154,10 @@
 
 		try {
 			analysis = await analyzeVideo(paths, targetVideoPath, tmpDir || undefined);
-		} catch (e) {
+
+			await tick();
+			mappingSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		} catch (/** @type {any} */ e) {
 			error = e.error_text || e.message || 'Analysis failed';
 		} finally {
 			analyzing = false;
@@ -166,15 +189,11 @@
 				tmpDir || undefined
 			);
 
-			job = {
-				job_id: res.job_id,
-				status: 'queued',
-				progress: { stage: 'queued', current: 0, total: 0 }
-			};
+			job = new JobState(res.job_id, 'queued', { stage: 'queued', current: 0, total: 0 });
 
 			startPolling(res.job_id);
 			saveActiveJob(res.job_id, outputPath);
-		} catch (e) {
+		} catch (/** @type {any} */ e) {
 			error = e.error_text || e.message || 'Failed to start swap';
 		} finally {
 			starting = false;
@@ -203,111 +222,131 @@
 	const videoExtensions = ['mp4', 'avi', 'mkv', 'mov', 'webm'];
 </script>
 
-<div class="flex flex-col gap-6">
-	<h2 class="text-xl font-semibold">Video swap</h2>
+<div class="flex flex-col gap-5">
+	<!-- Step indicator -->
+	<StepIndicator {steps} {currentStep} />
 
-	<!-- Source paths -->
-	<div class="flex flex-col gap-3">
-		{#each sourcePaths as path, i}
-			<div class="flex items-end gap-2">
-				<div class="flex-1">
-					<PathInput
-						label={i === 0 ? 'Source image(s)' : ''}
-						value={path}
-						filterExtensions={imageExtensions}
-						storageKey="source"
-						onchange={(v) => updateSourcePath(i, v)}
-					/>
-				</div>
-				{#if sourcePaths.length > 1}
-					<button
-						class="px-2 py-1.5 text-sm text-red-400 hover:text-red-300"
-						onclick={() => removeSourcePath(i)}
-					>
-						Remove
-					</button>
-				{/if}
-			</div>
-		{/each}
-		<button
-			class="text-xs text-blue-400 hover:text-blue-300 self-start"
-			onclick={addSourcePath}
-		>
-			+ Add source image
-		</button>
-	</div>
-
-	<!-- Source previews -->
-	{#if sourcePaths.some((p) => p.trim())}
-		<div class="flex gap-3 flex-wrap">
-			{#each sourcePaths as path}
-				{#if path.trim()}
-					<MediaPreview {path} />
-				{/if}
-			{/each}
+	<!-- Input configuration card -->
+	<section class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col" aria-busy={analyzing}>
+		<!-- SOURCE sub-section -->
+		<div class="flex flex-col gap-3 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Source</span>
+			<SourcePathList bind:paths={sourcePaths} filterExtensions={imageExtensions} storageKey="source" />
 		</div>
-	{/if}
 
-	<!-- Target video path -->
-	<PathInput
-		label="Target video"
-		value={targetVideoPath}
-		filterExtensions={videoExtensions}
-		storageKey="target_video"
-		onchange={(v) => (targetVideoPath = v)}
-	/>
+		<!-- TARGET sub-section -->
+		<div class="flex flex-col gap-3 border-t border-border pt-4 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Target</span>
+			<PathInput
+				value={targetVideoPath}
+				placeholder="/path/to/video.mp4"
+				filterExtensions={videoExtensions}
+				storageKey="target_video"
+				onchange={(/** @type {string} */ v) => (targetVideoPath = v)}
+			/>
+			<!-- Target preview — animate in with grid-expand -->
+			<div class="grid-expand {targetVideoPath.trim() ? 'open' : ''}">
+				<div>
+					{#if targetVideoPath.trim()}
+						<div class="w-full max-w-sm pt-1">
+							<MediaPreview path={targetVideoPath} type="video" />
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
 
-	<!-- Target video preview -->
-	{#if targetVideoPath.trim()}
-		<MediaPreview path={targetVideoPath} type="video" />
-	{/if}
+		<!-- OUTPUT sub-section -->
+		<div class="flex flex-col gap-3 border-t border-border pt-4 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Output</span>
+			<PathInput
+				value={outputPath}
+				placeholder="/path/to/output.mp4"
+				filterExtensions={videoExtensions}
+				storageKey="output_video"
+				saveMode={true}
+				defaultFilename="out.mp4"
+				onchange={(/** @type {string} */ v) => (outputPath = v)}
+			/>
+		</div>
 
-	<!-- Output path -->
-	<PathInput
-		label="Output path"
-		value={outputPath}
-		filterExtensions={videoExtensions}
-		storageKey="output_video"
-		saveMode={true}
-		defaultFilename="out.mp4"
-		onchange={(v) => (outputPath = v)}
-	/>
+		<!-- OPTIONS sub-section -->
+		<div class="flex flex-col gap-3 border-t border-border pt-4 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Options</span>
+			<OptionsBar
+				{enhance}
+				{mouthMask}
+				onEnhanceChange={(/** @type {boolean} */ v) => (enhance = v)}
+				onMouthMaskChange={(/** @type {boolean} */ v) => (mouthMask = v)}
+			/>
 
-	<!-- Temp directory -->
-	<PathInput
-		label="Temp directory (frames)"
-		value={tmpDir}
-		storageKey="tmp_dir_video"
-		onchange={(v) => (tmpDir = v)}
-	/>
+			<!-- Advanced toggle for temp directory -->
+			<button
+				class="flex items-center gap-1.5 py-2 text-xs text-text-muted hover:text-text-secondary transition-colors self-start
+				   focus-visible:ring-2 focus-visible:ring-accent/50 rounded-md"
+				onclick={() => (advancedOpen = !advancedOpen)}
+			>
+				<svg
+					class="w-3 h-3 transition-transform duration-150 {advancedOpen ? 'rotate-90' : ''}"
+					fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"
+				>
+					<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+				</svg>
+				Advanced
+			</button>
+			<div class="grid-expand {advancedOpen ? 'open' : ''}">
+				<div>
+					<div class="pt-2">
+						<PathInput
+							label="Temp directory (frames)"
+							value={tmpDir}
+							placeholder="/path/to/tmp_frames"
+							storageKey="tmp_dir_video"
+							onchange={(/** @type {string} */ v) => (tmpDir = v)}
+						/>
+					</div>
+				</div>
+			</div>
+		</div>
 
-	<!-- Options -->
-	<OptionsBar
-		{enhance}
-		{mouthMask}
-		onEnhanceChange={(v) => (enhance = v)}
-		onMouthMaskChange={(v) => (mouthMask = v)}
-	/>
-
-	<!-- Analyze button -->
-	<button
-		class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-sm font-medium self-start"
-		onclick={handleAnalyze}
-		disabled={analyzing}
-	>
-		{analyzing ? 'Analyzing...' : 'Analyze video'}
-	</button>
+		<!-- Analyze button — inside card -->
+		<div class="border-t border-border pt-4">
+			<button
+				class="w-full sm:w-auto px-5 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed
+					   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
+					   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+				onclick={handleAnalyze}
+				disabled={analyzing}
+			>
+				{analyzing ? 'Analyzing...' : 'Analyze video'}
+			</button>
+		</div>
+	</section>
 
 	<!-- Error -->
 	{#if error}
-		<div class="text-sm text-red-400 bg-red-900/20 px-4 py-2 rounded">{error}</div>
+		<div class="flex items-start gap-3 text-sm text-danger bg-danger/10 border border-danger/20 px-4 py-3 rounded-lg section-enter">
+			<span class="shrink-0 mt-0.5 font-bold">!</span>
+			<span class="flex-1 min-w-0">{error}</span>
+			<button
+				class="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-danger/60 hover:text-danger
+					   hover:bg-danger/10 rounded-md transition-colors
+					   focus-visible:ring-2 focus-visible:ring-danger/50"
+				onclick={() => (error = '')}
+				aria-label="Dismiss error"
+			>&times;</button>
+		</div>
 	{/if}
 
-	<!-- Analysis results + mapper -->
+	<!-- Analysis results + mapper card -->
 	{#if analysis}
-		<div class="border-t border-gray-800 pt-4 flex flex-col gap-3">
-			<div class="text-sm text-gray-400">
-				{analysis.total_frames} frames, analyzed in {analysis.elapsed_s.toFixed(1)}s,
+		<section
+			bind:this={mappingSection}
+			class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-4 section-enter"
+			aria-busy={starting}
+		>
+			<div class="text-sm text-text-secondary">
+				{analysis.total_frames} frames, analyzed in {analysis.elapsed_s.toFixed(1)}s —
 				{analysis.clusters.length} cluster(s) found
 			</div>
 
@@ -315,42 +354,54 @@
 				sourceFaces={analysis.source_faces}
 				targetItems={analysis.clusters}
 				mode="video"
-				onMappingsChange={(m) => (clusterMappings = m)}
+				onMappingsChange={(/** @type {ClusterMapping[]} */ m) => (clusterMappings = m)}
 			/>
 
-			<!-- Start swap button -->
 			{#if !job}
-				<button
-					class="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-sm font-medium self-start"
-					onclick={handleStartSwap}
-					disabled={starting || clusterMappings.length === 0}
-				>
-					{starting ? 'Starting...' : 'Start swap'}
-				</button>
+				<!-- Start swap button — inside mapping card -->
+				<div class="border-t border-border pt-4">
+					<button
+						class="w-full sm:w-auto px-5 py-2.5 bg-success hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed
+							   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
+							   focus-visible:ring-2 focus-visible:ring-success/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+						onclick={handleStartSwap}
+						disabled={starting || clusterMappings.length === 0}
+					>
+						{starting ? 'Starting...' : 'Start swap'}
+					</button>
+				</div>
 			{/if}
-		</div>
+		</section>
 	{/if}
 
-	<!-- Job progress -->
+	<!-- Job progress / result card -->
 	{#if job}
-		<div class="border-t border-gray-800 pt-4 flex flex-col gap-3">
+		<section
+			bind:this={resultSection}
+			class="rounded-xl border {job.status === 'completed' ? 'border-success/30' : job.status === 'failed' ? 'border-danger/30' : 'border-border'}
+				   bg-surface-1 p-4 sm:p-5 flex flex-col gap-3 section-enter"
+		>
 			{#if job.status === 'queued' || job.status === 'running'}
 				<ProgressBar progress={job.progress} />
 			{/if}
 
 			{#if job.status === 'completed'}
-				<div class="text-sm text-green-400">Video swap completed.</div>
+				<div class="flex items-center gap-2 text-sm text-success font-medium">
+					Video swap completed
+				</div>
 				{#if job.result}
-					<div class="text-xs text-gray-500">Output: {job.result.output_path}</div>
-					<MediaPreview path={job.result.output_path} type="video" />
+					<div class="text-xs text-text-muted break-all">Output: {job.result.output_path}</div>
+					<div class="w-full max-w-sm">
+						<MediaPreview path={job.result.output_path} type="video" />
+					</div>
 				{/if}
 			{/if}
 
 			{#if job.status === 'failed'}
-				<div class="text-sm text-red-400">
+				<div class="text-sm text-danger">
 					Video swap failed{job.error ? `: ${job.error}` : ''}
 				</div>
 			{/if}
-		</div>
+		</section>
 	{/if}
 </div>

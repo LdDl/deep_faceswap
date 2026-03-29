@@ -1,8 +1,11 @@
 <script>
+	import { tick } from 'svelte';
+	import SourcePathList from '$lib/components/SourcePathList.svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
 	import MediaPreview from '$lib/components/MediaPreview.svelte';
 	import FaceMapper from '$lib/components/FaceMapper.svelte';
 	import OptionsBar from '$lib/components/OptionsBar.svelte';
+	import StepIndicator from '$lib/components/StepIndicator.svelte';
 	import { detectFaces } from '$lib/stores/detection.js';
 	import { swapImage } from '$lib/stores/swap.js';
 	import { FaceMapping } from '$lib/face_mapping.js';
@@ -26,22 +29,27 @@
 	let swapping = $state(false);
 	let error = $state('');
 
-	function addSourcePath() {
-		sourcePaths = [...sourcePaths, ''];
-	}
+	/** @type {HTMLElement|undefined} */
+	let mappingSection = $state();
+	/** @type {HTMLElement|undefined} */
+	let resultSection = $state();
 
-	/** @param {number} index */
-	function removeSourcePath(index) {
-		sourcePaths = sourcePaths.filter((_, i) => i !== index);
-	}
+	const steps = [
+		{ label: 'Setup' },
+		{ label: 'Detect' },
+		{ label: 'Map' },
+		{ label: 'Swap' },
+		{ label: 'Result' }
+	];
 
-	/**
-	 * @param {number} index
-	 * @param {string} value
-	 */
-	function updateSourcePath(index, value) {
-		sourcePaths[index] = value;
-	}
+	let currentStep = $derived.by(() => {
+		if (swapResult) return 4;
+		if (swapping) return 3;
+		if (detection && mappings.length > 0) return 3;
+		if (detection) return 2;
+		if (detecting) return 1;
+		return 0;
+	});
 
 	async function handleDetect() {
 		const paths = sourcePaths.filter((p) => p.trim());
@@ -62,7 +70,10 @@
 			if (detection.source_faces.length === 1 && detection.target_faces.length === 1) {
 				mappings = [new FaceMapping(0, 0)];
 			}
-		} catch (e) {
+
+			await tick();
+			mappingSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		} catch (/** @type {any} */ e) {
 			error = e.error_text || e.message || 'Detection failed';
 		} finally {
 			detecting = false;
@@ -92,7 +103,10 @@
 				enhance,
 				mouthMask
 			);
-		} catch (e) {
+
+			await tick();
+			resultSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		} catch (/** @type {any} */ e) {
 			error = e.error_text || e.message || 'Swap failed';
 		} finally {
 			swapping = false;
@@ -102,128 +116,136 @@
 	const imageExtensions = ['jpg', 'jpeg', 'png', 'bmp', 'webp'];
 </script>
 
-<div class="flex flex-col gap-6">
-	<h2 class="text-xl font-semibold">Image swap</h2>
+<div class="flex flex-col gap-5">
+	<!-- Step indicator -->
+	<StepIndicator {steps} {currentStep} />
 
-	<!-- Source paths -->
-	<div class="flex flex-col gap-3">
-		{#each sourcePaths as path, i}
-			<div class="flex items-end gap-2">
-				<div class="flex-1">
-					<PathInput
-						label={i === 0 ? 'Source image(s)' : ''}
-						value={path}
-						filterExtensions={imageExtensions}
-						storageKey="source"
-						onchange={(v) => updateSourcePath(i, v)}
-					/>
-				</div>
-				{#if sourcePaths.length > 1}
-					<button
-						class="px-2 py-1.5 text-sm text-red-400 hover:text-red-300"
-						onclick={() => removeSourcePath(i)}
-					>
-						Remove
-					</button>
-				{/if}
-			</div>
-		{/each}
-		<button
-			class="text-xs text-blue-400 hover:text-blue-300 self-start"
-			onclick={addSourcePath}
-		>
-			+ Add source image
-		</button>
-	</div>
-
-	<!-- Source previews -->
-	{#if sourcePaths.some((p) => p.trim())}
-		<div class="flex gap-3 flex-wrap">
-			{#each sourcePaths as path}
-				{#if path.trim()}
-					<MediaPreview {path} />
-				{/if}
-			{/each}
+	<!-- Input configuration card -->
+	<section class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col" aria-busy={detecting}>
+		<!-- SOURCE sub-section -->
+		<div class="flex flex-col gap-3 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Source</span>
+			<SourcePathList bind:paths={sourcePaths} filterExtensions={imageExtensions} storageKey="source" />
 		</div>
-	{/if}
 
-	<!-- Target path -->
-	<PathInput
-		label="Target image"
-		value={targetPath}
-		filterExtensions={imageExtensions}
-		storageKey="target"
-		onchange={(v) => (targetPath = v)}
-	/>
+		<!-- TARGET sub-section -->
+		<div class="flex flex-col gap-3 border-t border-border pt-4 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Target</span>
+			<PathInput
+				value={targetPath}
+				placeholder="/path/to/target.jpg"
+				filterExtensions={imageExtensions}
+				storageKey="target"
+				onchange={(/** @type {string} */ v) => (targetPath = v)}
+			/>
+			<!-- Target preview — animate in with grid-expand -->
+			<div class="grid-expand {targetPath.trim() ? 'open' : ''}">
+				<div>
+					{#if targetPath.trim()}
+						<div class="w-full max-w-sm pt-1">
+							<MediaPreview path={targetPath} />
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
 
-	<!-- Target preview -->
-	{#if targetPath.trim()}
-		<MediaPreview path={targetPath} />
-	{/if}
+		<!-- OUTPUT sub-section -->
+		<div class="flex flex-col gap-3 border-t border-border pt-4 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Output</span>
+			<PathInput
+				value={outputPath}
+				placeholder="/path/to/output.jpg"
+				filterExtensions={imageExtensions}
+				storageKey="output"
+				saveMode={true}
+				defaultFilename="out.jpg"
+				onchange={(/** @type {string} */ v) => (outputPath = v)}
+			/>
+		</div>
 
-	<!-- Output path -->
-	<PathInput
-		label="Output path"
-		value={outputPath}
-		filterExtensions={imageExtensions}
-		storageKey="output"
-		saveMode={true}
-		defaultFilename="out.jpg"
-		onchange={(v) => (outputPath = v)}
-	/>
+		<!-- OPTIONS sub-section -->
+		<div class="flex flex-col gap-3 border-t border-border pt-4 pb-4">
+			<span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Options</span>
+			<OptionsBar
+				{enhance}
+				{mouthMask}
+				onEnhanceChange={(/** @type {boolean} */ v) => (enhance = v)}
+				onMouthMaskChange={(/** @type {boolean} */ v) => (mouthMask = v)}
+			/>
+		</div>
 
-	<!-- Options -->
-	<OptionsBar
-		{enhance}
-		{mouthMask}
-		onEnhanceChange={(v) => (enhance = v)}
-		onMouthMaskChange={(v) => (mouthMask = v)}
-	/>
-
-	<!-- Detect button -->
-	<button
-		class="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-sm font-medium self-start"
-		onclick={handleDetect}
-		disabled={detecting}
-	>
-		{detecting ? 'Detecting...' : 'Detect faces'}
-	</button>
+		<!-- Detect button — inside card -->
+		<div class="border-t border-border pt-4">
+			<button
+				class="w-full sm:w-auto px-5 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed
+					   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
+					   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+				onclick={handleDetect}
+				disabled={detecting}
+			>
+				{detecting ? 'Detecting...' : 'Detect faces'}
+			</button>
+		</div>
+	</section>
 
 	<!-- Error -->
 	{#if error}
-		<div class="text-sm text-red-400 bg-red-900/20 px-4 py-2 rounded">{error}</div>
+		<div class="flex items-start gap-3 text-sm text-danger bg-danger/10 border border-danger/20 px-4 py-3 rounded-lg section-enter">
+			<span class="shrink-0 mt-0.5 font-bold">!</span>
+			<span class="flex-1 min-w-0">{error}</span>
+			<button
+				class="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-danger/60 hover:text-danger
+					   hover:bg-danger/10 rounded-md transition-colors
+					   focus-visible:ring-2 focus-visible:ring-danger/50"
+				onclick={() => (error = '')}
+				aria-label="Dismiss error"
+			>&times;</button>
+		</div>
 	{/if}
 
-	<!-- Face mapper -->
+	<!-- Face mapping card -->
 	{#if detection}
-		<div class="border-t border-gray-800 pt-4">
+		<section
+			bind:this={mappingSection}
+			class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-4 section-enter"
+			aria-busy={swapping}
+		>
 			<FaceMapper
 				sourceFaces={detection.source_faces}
 				targetItems={detection.target_faces}
 				mode="image"
-				onMappingsChange={(m) => (mappings = m)}
+				onMappingsChange={(/** @type {FaceMapping[]} */ m) => (mappings = m)}
 			/>
-		</div>
 
-		<!-- Swap button -->
-		<button
-			class="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 disabled:text-gray-400 text-white rounded text-sm font-medium self-start"
-			onclick={handleSwap}
-			disabled={swapping || mappings.length === 0}
-		>
-			{swapping ? 'Swapping...' : 'Swap faces'}
-		</button>
+			<!-- Swap button — inside mapping card -->
+			<div class="border-t border-border pt-4">
+				<button
+					class="w-full sm:w-auto px-5 py-2.5 bg-success hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed
+						   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
+						   focus-visible:ring-2 focus-visible:ring-success/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+					onclick={handleSwap}
+					disabled={swapping || mappings.length === 0}
+				>
+					{swapping ? 'Swapping...' : 'Swap faces'}
+				</button>
+			</div>
+		</section>
 	{/if}
 
-	<!-- Result -->
+	<!-- Result card -->
 	{#if swapResult}
-		<div class="border-t border-gray-800 pt-4 flex flex-col gap-3">
-			<div class="text-sm text-green-400">
-				Swap completed in {swapResult.elapsed_s.toFixed(1)}s. {swapResult.faces_swapped} face(s)
-				swapped.
+		<section
+			bind:this={resultSection}
+			class="rounded-xl border border-success/30 bg-surface-1 p-4 sm:p-5 flex flex-col gap-3 section-enter"
+		>
+			<div class="flex items-center gap-2 text-sm text-success font-medium">
+				Swap completed in {swapResult.elapsed_s.toFixed(1)}s — {swapResult.faces_swapped} face(s) swapped
 			</div>
-			<div class="text-xs text-gray-500">Output: {swapResult.output_path}</div>
-			<MediaPreview path={swapResult.output_path} />
-		</div>
+			<div class="text-xs text-text-muted break-all">Output: {swapResult.output_path}</div>
+			<div class="w-full max-w-sm">
+				<MediaPreview path={swapResult.output_path} />
+			</div>
+		</section>
 	{/if}
 </div>

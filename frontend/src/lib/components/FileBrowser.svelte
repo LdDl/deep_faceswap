@@ -14,10 +14,20 @@
 	let pathInputValue = $state('');
 	let filename = $state('');
 
+	/** @type {HTMLDivElement|undefined} */
+	let dialogRef = $state();
+
 	// Initialize filename when opening in save mode
 	$effect(() => {
 		if (open && saveMode && defaultFilename && !filename) {
 			filename = defaultFilename;
+		}
+	});
+
+	// Focus the dialog when it opens
+	$effect(() => {
+		if (open && dialogRef) {
+			dialogRef.focus();
 		}
 	});
 
@@ -113,6 +123,41 @@
 		onSelect(fullPath);
 	}
 
+	/** @param {KeyboardEvent} e */
+	function handleDialogKeydown(e) {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			onClose();
+			return;
+		}
+
+		// Simple focus trap: keep Tab within the dialog
+		if (e.key === 'Tab' && dialogRef) {
+			const focusable = dialogRef.querySelectorAll(
+				'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			);
+			if (focusable.length === 0) return;
+
+			const first = /** @type {HTMLElement} */ (focusable[0]);
+			const last = /** @type {HTMLElement} */ (focusable[focusable.length - 1]);
+
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+	}
+
+	/** @param {MouseEvent} e */
+	function handleBackdropClick(e) {
+		if (e.target === e.currentTarget) {
+			onClose();
+		}
+	}
+
 	/**
 	 * @param {string} name
 	 * @returns {boolean}
@@ -137,36 +182,71 @@
 </script>
 
 {#if open}
-	<div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" role="dialog">
-		<div class="bg-gray-800 rounded-lg shadow-xl w-[600px] max-h-[500px] flex flex-col">
-			<div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-				<h3 class="text-sm font-medium text-gray-200">Browse files</h3>
-				<button class="text-gray-400 hover:text-gray-200" onclick={onClose}>&times;</button>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Browse files"
+		onkeydown={handleDialogKeydown}
+		onclick={handleBackdropClick}
+		bind:this={dialogRef}
+		tabindex="-1"
+	>
+		<!-- Full-screen on mobile, centered card on sm+ -->
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="bg-surface-1 w-full h-[92vh] sm:h-auto sm:rounded-xl shadow-2xl sm:max-w-[600px] sm:max-h-[min(500px,85vh)]
+				   flex flex-col border-t sm:border border-border rounded-t-xl"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={() => {}}
+		>
+			<!-- Header -->
+			<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+				<h3 class="text-sm font-semibold text-text-primary">Browse files</h3>
+				<button
+					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-text-muted hover:text-text-primary
+						   hover:bg-surface-3 rounded-lg transition-colors
+						   focus-visible:ring-2 focus-visible:ring-accent/50"
+					onclick={onClose}
+					aria-label="Close"
+				>&times;</button>
 			</div>
 
-			<div class="flex items-center gap-1 px-4 py-2 border-b border-gray-700">
+			<!-- Navigation bar -->
+			<div class="flex items-center gap-1 px-4 py-2 border-b border-border shrink-0">
 				<button
-					class="px-2 py-1 text-xs rounded enabled:hover:bg-gray-700 disabled:text-gray-600 text-gray-400"
+					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-sm rounded-lg
+						   enabled:hover:bg-surface-3 disabled:text-text-muted text-text-secondary transition-colors
+						   focus-visible:ring-2 focus-visible:ring-accent/50"
 					disabled={historyIndex <= 0}
 					onclick={goBack}
 					title="Back"
+					aria-label="Go back"
 				>&larr;</button>
 				<button
-					class="px-2 py-1 text-xs rounded enabled:hover:bg-gray-700 disabled:text-gray-600 text-gray-400"
+					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-sm rounded-lg
+						   enabled:hover:bg-surface-3 disabled:text-text-muted text-text-secondary transition-colors
+						   focus-visible:ring-2 focus-visible:ring-accent/50"
 					disabled={historyIndex >= history.length - 1}
 					onclick={goForward}
 					title="Forward"
+					aria-label="Go forward"
 				>&rarr;</button>
 				<button
-					class="px-2 py-1 text-xs rounded enabled:hover:bg-gray-700 disabled:text-gray-600 text-gray-400"
+					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-sm rounded-lg
+						   enabled:hover:bg-surface-3 disabled:text-text-muted text-text-secondary transition-colors
+						   focus-visible:ring-2 focus-visible:ring-accent/50"
 					disabled={currentPath === '/'}
 					onclick={goUp}
 					title="Up"
+					aria-label="Go up one directory"
 				>&uarr;</button>
 				{#if editingPath}
 					<input
 						type="text"
-						class="flex-1 ml-2 bg-gray-700 text-gray-200 text-xs px-2 py-1 rounded border border-gray-500 focus:border-blue-500 focus:outline-none font-mono"
+						class="flex-1 ml-2 bg-surface-2 text-text-primary text-xs px-2 py-1.5 rounded-lg border border-border
+							   focus:border-border-focus focus:ring-1 focus:ring-border-focus/30 focus:outline-none font-mono"
 						bind:value={pathInputValue}
 						onkeydown={(e) => { if (e.key === 'Enter') submitPath(); if (e.key === 'Escape') cancelEditPath(); }}
 						onblur={submitPath}
@@ -174,37 +254,42 @@
 					/>
 				{:else}
 					<button
-						class="flex-1 ml-2 text-left truncate"
+						class="flex-1 ml-2 text-left truncate rounded-md focus-visible:ring-2 focus-visible:ring-accent/50"
 						onclick={startEditPath}
 						title="Click to edit path"
 					>
-						<code class="text-xs text-gray-400 hover:text-gray-200">{currentPath}</code>
+						<code class="text-xs text-text-secondary hover:text-text-primary transition-colors">{currentPath}</code>
 					</button>
 				{/if}
 			</div>
 
+			<!-- Error -->
 			{#if error}
-				<div class="px-4 py-2 text-sm text-red-400">{error}</div>
+				<div class="px-4 py-2 text-sm text-danger shrink-0">{error}</div>
 			{/if}
 
-			<div class="flex-1 overflow-y-auto">
+			<!-- File list -->
+			<div class="flex-1 overflow-y-auto min-h-0">
 				{#if loading}
-					<div class="px-4 py-8 text-center text-gray-500">Loading...</div>
+					<div class="px-4 py-8 text-center text-text-muted text-sm">Loading...</div>
+				{:else if entries.length === 0}
+					<div class="px-4 py-8 text-center text-text-muted text-sm">Empty directory</div>
 				{:else}
 					{#each entries as entry}
 						{#if entry.is_dir || matchesFilter(entry.name)}
 							<button
-								class="w-full text-left px-4 py-1.5 hover:bg-gray-700 flex items-center gap-2 text-sm"
+								class="w-full text-left px-4 py-2.5 hover:bg-surface-2 flex items-center gap-2 text-sm transition-colors
+								focus-visible:bg-surface-2 focus-visible:outline-none"
 								onclick={() => handleClick(entry)}
 							>
-								<span class="w-4 text-center text-gray-500">
+								<span class="w-4 text-center text-text-muted shrink-0">
 									{entry.is_dir ? '/' : ' '}
 								</span>
-								<span class={entry.is_dir ? 'text-blue-400' : 'text-gray-300'}>
+								<span class="truncate {entry.is_dir ? 'text-accent' : 'text-text-primary'}">
 									{entry.name}
 								</span>
 								{#if !entry.is_dir}
-									<span class="ml-auto text-xs text-gray-600">{formatSize(entry.size)}</span>
+									<span class="ml-auto text-xs text-text-muted shrink-0 tabular-nums">{formatSize(entry.size)}</span>
 								{/if}
 							</button>
 						{/if}
@@ -212,18 +297,22 @@
 				{/if}
 			</div>
 
+			<!-- Save mode footer -->
 			{#if saveMode}
-				<div class="px-4 py-3 border-t border-gray-700 flex flex-col gap-2">
+				<div class="px-4 py-3 border-t border-border flex flex-col gap-2 shrink-0">
 					<div class="flex items-center gap-2">
-						<span class="text-xs text-gray-400 shrink-0">File name:</span>
+						<span class="text-xs text-text-secondary shrink-0">File name:</span>
 						<input
 							type="text"
-							class="flex-1 bg-gray-700 text-gray-200 text-sm px-2 py-1 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+							class="flex-1 min-w-0 bg-surface-2 text-text-primary text-sm px-2.5 py-1.5 rounded-lg border border-border
+								   focus:border-border-focus focus:ring-1 focus:ring-border-focus/30 focus:outline-none"
 							bind:value={filename}
 							onkeydown={(e) => { if (e.key === 'Enter') handleSave(); }}
 						/>
 						<button
-							class="px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:text-gray-400 text-sm text-white rounded"
+							class="px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed
+								   text-sm text-white rounded-lg font-medium transition-colors shrink-0
+								   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
 							disabled={!filename.trim()}
 							onclick={handleSave}
 						>
@@ -231,7 +320,7 @@
 						</button>
 					</div>
 					{#if filenameExists}
-						<div class="text-xs text-yellow-400">File already exists and will be overwritten</div>
+						<div class="text-xs text-warning">File already exists and will be overwritten</div>
 					{/if}
 				</div>
 			{/if}

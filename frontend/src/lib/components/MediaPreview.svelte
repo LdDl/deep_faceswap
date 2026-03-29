@@ -16,31 +16,48 @@
 	);
 
 	let extension = $derived(path.split('.').pop()?.toLowerCase() || '');
+	let loaded = $state(false);
+
+	// Reset loaded state when path changes
+	$effect(() => {
+		path;
+		loaded = false;
+	});
 </script>
 
 {#if path}
-	<div class="w-full max-w-sm rounded overflow-hidden border border-gray-700 bg-gray-900">
+	<div class="w-full rounded-lg overflow-hidden border border-border bg-surface-2">
 		{#if isVideo}
 			{#if canPlay}
-				<video
-					src={fileUrl(path)}
-					controls
-					preload="metadata"
-					class="w-full max-h-72 object-contain"
-				>
-					<track kind="captions" />
-				</video>
+				<div class="aspect-video bg-black">
+					<video
+						src={fileUrl(path)}
+						controls
+						preload="metadata"
+						class="w-full h-full object-contain"
+					>
+						<track kind="captions" />
+					</video>
+				</div>
 			{:else}
-				<div class="flex items-center justify-center h-24 text-sm text-gray-500">
+				<div class="aspect-video flex items-center justify-center text-sm text-text-muted bg-surface-2">
 					.{extension} preview not supported in browser
 				</div>
 			{/if}
 		{:else}
-			<img
-				src={fileUrl(path)}
-				alt="Preview"
-				class="w-full max-h-72 object-contain"
-			/>
+			<div class="aspect-video flex items-center justify-center bg-black relative">
+				{#if !loaded}
+					<div class="absolute inset-0 bg-surface-2 animate-pulse"></div>
+				{/if}
+				<img
+					src={fileUrl(path)}
+					alt="Preview"
+					loading="lazy"
+					class="max-w-full max-h-full object-contain"
+					onload={() => loaded = true}
+					onerror={() => loaded = true}
+				/>
+			</div>
 		{/if}
 	</div>
 {/if}
