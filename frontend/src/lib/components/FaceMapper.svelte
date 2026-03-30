@@ -4,12 +4,35 @@
 	import { ClusterMapping } from '$lib/cluster_mapping.js';
 	import Lightbox from './Lightbox.svelte';
 
-	let { sourceFaces, targetItems, mode, onMappingsChange } = $props();
+	import { untrack } from 'svelte';
+
+	let { sourceFaces, targetItems, mode, onMappingsChange, initialAutoMap = false } = $props();
 
 	let selectedSource = $state(null);
 	/** @type {{ source: number, target: number }[]} */
 	let mappings = $state([]);
 	let lightboxSrc = $state('');
+
+	// Reset mappings when source/target props change; optionally auto-map
+	let prevSourceLen = -1;
+	let prevTargetLen = -1;
+	$effect(() => {
+		const sLen = sourceFaces.length;
+		const tLen = targetItems.length;
+		if (sLen !== prevSourceLen || tLen !== prevTargetLen) {
+			prevSourceLen = sLen;
+			prevTargetLen = tLen;
+			untrack(() => {
+				mappings = [];
+				selectedSource = null;
+				if (initialAutoMap && sLen > 0 && tLen > 0) {
+					autoMap();
+				} else {
+					emitMappings();
+				}
+			});
+		}
+	});
 
 	/** @param {object} item */
 	function isCluster(item) {
@@ -92,6 +115,7 @@
 		<h3 class="text-sm font-semibold text-text-primary">Face mapping</h3>
 		<div class="flex gap-2">
 			<button
+				type="button"
 				class="px-2.5 py-1 text-xs font-medium bg-surface-2 hover:bg-surface-3
 					   text-text-secondary hover:text-text-primary rounded-md border border-border transition-colors
 					   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface-1"
@@ -100,6 +124,7 @@
 				Auto-map
 			</button>
 			<button
+				type="button"
 				class="px-2.5 py-1 text-xs font-medium bg-surface-2 hover:bg-surface-3
 					   text-text-secondary hover:text-text-primary rounded-md border border-border transition-colors
 					   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-1 focus-visible:ring-offset-surface-1"
@@ -132,6 +157,7 @@
 					{#each sourceFaces as face}
 						{@const mapped = getMappedTarget(face.index)}
 						<button
+							type="button"
 							class="flex items-center gap-2 p-1.5 rounded-lg border-2 transition-colors shrink-0
 								   focus-visible:ring-2 focus-visible:ring-accent/50
 								   {selectedSource === face.index
@@ -146,7 +172,7 @@
 							<img
 								src={cropUrl(face.crop_url)}
 								alt="Source face {face.index}"
-								class="w-16 h-16 object-cover rounded-md cursor-zoom-in"
+								width="64" height="64" class="w-16 h-16 object-cover rounded-md cursor-zoom-in"
 								onclick={(e) => { e.stopPropagation(); lightboxSrc = cropUrl(face.crop_url); }}
 								role="button"
 								tabindex="-1"
@@ -174,6 +200,7 @@
 						<span class="text-text-muted">&rarr;</span>
 						<span class="font-mono tabular-nums">{mapping.target}</span>
 						<button
+							type="button"
 							class="ml-0.5 w-6 h-6 sm:w-5 sm:h-5 inline-flex items-center justify-center rounded-sm
 								   text-danger/70 hover:text-danger hover:bg-danger/10 transition-colors
 								   focus-visible:ring-2 focus-visible:ring-danger/50"
@@ -200,6 +227,7 @@
 						{@const tid = getTargetId(item)}
 						{@const mapped = getMappedSource(tid)}
 						<button
+							type="button"
 							class="flex items-center gap-2 p-1.5 rounded-lg border-2 transition-colors shrink-0
 								   focus-visible:ring-2 focus-visible:ring-accent/50
 								   {mapped !== undefined
@@ -212,7 +240,7 @@
 							<img
 								src={cropUrl(item.crop_url)}
 								alt={getTargetLabel(item)}
-								class="w-16 h-16 object-cover rounded-md cursor-zoom-in"
+								width="64" height="64" class="w-16 h-16 object-cover rounded-md cursor-zoom-in"
 								onclick={(e) => { e.stopPropagation(); lightboxSrc = cropUrl(item.crop_url); }}
 								role="button"
 								tabindex="-1"

@@ -19,7 +19,12 @@ export async function request(method, path, body) {
 		opts.body = JSON.stringify(body)
 	}
 	const res = await fetch(url, opts)
-	const data = await res.json()
+	let data
+	try {
+		data = await res.json()
+	} catch {
+		throw new ApiError(res.status, `Server returned non-JSON response (HTTP ${res.status})`)
+	}
 	if (!res.ok) {
 		throw new ApiError(res.status, data.error_text || `HTTP ${res.status}`)
 	}

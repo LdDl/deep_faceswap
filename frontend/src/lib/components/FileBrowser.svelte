@@ -12,6 +12,7 @@
 	let historyIndex = $state(-1);
 	let editingPath = $state(false);
 	let pathInputValue = $state('');
+	let cancelledEdit = false;
 	let filename = $state('');
 
 	/** @type {HTMLDivElement|undefined} */
@@ -38,6 +39,12 @@
 
 	$effect(() => {
 		if (open) {
+			// Reset stale state from previous browse session
+			history = [];
+			historyIndex = -1;
+			error = '';
+			editingPath = false;
+			entries = [];
 			loadDir(startPath || '/');
 		}
 	});
@@ -89,6 +96,10 @@
 	}
 
 	function submitPath() {
+		if (cancelledEdit) {
+			cancelledEdit = false;
+			return;
+		}
 		editingPath = false;
 		const val = pathInputValue.trim();
 		if (val && val !== currentPath) {
@@ -97,6 +108,7 @@
 	}
 
 	function cancelEditPath() {
+		cancelledEdit = true;
 		editingPath = false;
 	}
 
@@ -205,6 +217,7 @@
 			<div class="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
 				<h3 class="text-sm font-semibold text-text-primary">Browse files</h3>
 				<button
+					type="button"
 					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-text-muted hover:text-text-primary
 						   hover:bg-surface-3 rounded-lg transition-colors
 						   focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -216,6 +229,7 @@
 			<!-- Navigation bar -->
 			<div class="flex items-center gap-1 px-4 py-2 border-b border-border shrink-0">
 				<button
+					type="button"
 					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-sm rounded-lg
 						   enabled:hover:bg-surface-3 disabled:text-text-muted text-text-secondary transition-colors
 						   focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -225,6 +239,7 @@
 					aria-label="Go back"
 				>&larr;</button>
 				<button
+					type="button"
 					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-sm rounded-lg
 						   enabled:hover:bg-surface-3 disabled:text-text-muted text-text-secondary transition-colors
 						   focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -234,6 +249,7 @@
 					aria-label="Go forward"
 				>&rarr;</button>
 				<button
+					type="button"
 					class="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-sm rounded-lg
 						   enabled:hover:bg-surface-3 disabled:text-text-muted text-text-secondary transition-colors
 						   focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -254,6 +270,7 @@
 					/>
 				{:else}
 					<button
+						type="button"
 						class="flex-1 ml-2 text-left truncate rounded-md focus-visible:ring-2 focus-visible:ring-accent/50"
 						onclick={startEditPath}
 						title="Click to edit path"
@@ -278,6 +295,7 @@
 					{#each entries as entry}
 						{#if entry.is_dir || matchesFilter(entry.name)}
 							<button
+								type="button"
 								class="w-full text-left px-4 py-2.5 hover:bg-surface-2 flex items-center gap-2 text-sm transition-colors
 								focus-visible:bg-surface-2 focus-visible:outline-none"
 								onclick={() => handleClick(entry)}
@@ -310,6 +328,7 @@
 							onkeydown={(e) => { if (e.key === 'Enter') handleSave(); }}
 						/>
 						<button
+							type="button"
 							class="px-3 py-1.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed
 								   text-sm text-white rounded-lg font-medium transition-colors shrink-0
 								   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"

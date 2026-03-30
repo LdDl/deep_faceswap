@@ -1,4 +1,5 @@
 <script>
+	import { untrack } from 'svelte';
 	import PathInput from './PathInput.svelte';
 	import Lightbox from './Lightbox.svelte';
 	import { fileUrl } from '$lib/api.js';
@@ -37,12 +38,19 @@
 		thumbErrors = { ...thumbErrors, [index]: true };
 	}
 
-	// Reset error state when path changes
+	// Reset error state when path changes — only track `paths`, not `thumbErrors`
 	$effect(() => {
-		paths.forEach((p, i) => {
-			if (p) {
-				thumbErrors = { ...thumbErrors, [i]: false };
-			}
+		const currentPaths = paths;
+		untrack(() => {
+			let changed = false;
+			const next = { ...thumbErrors };
+			currentPaths.forEach((p, i) => {
+				if (p && next[i]) {
+					next[i] = false;
+					changed = true;
+				}
+			});
+			if (changed) thumbErrors = next;
 		});
 	});
 </script>
@@ -53,6 +61,7 @@
 			<div class="flex items-end gap-2">
 				<!-- Inline thumbnail — click to enlarge -->
 				<button
+					type="button"
 					class="w-10 h-10 rounded-md border border-border shrink-0 overflow-hidden bg-surface-2 self-end
 						   {path.trim() && !thumbErrors[i] ? 'cursor-zoom-in' : 'cursor-default'}
 						   focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -90,6 +99,7 @@
 	</div>
 
 	<button
+		type="button"
 		class="px-3 py-1.5 text-xs font-medium text-accent border border-dashed border-accent/40
 			   hover:border-accent hover:bg-accent/5 rounded-lg transition-colors self-start
 		   focus-visible:ring-2 focus-visible:ring-accent/50"

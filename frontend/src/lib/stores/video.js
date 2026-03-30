@@ -39,10 +39,12 @@ export class VideoSwapResponse {
 }
 
 /**
+ * Start async video analysis job. Returns job_id; poll /api/jobs/{id} for progress.
+ * When completed, job.result.data contains the VideoAnalyzeResponse payload.
  * @param {string[]} sourcePaths
  * @param {string} targetVideoPath
  * @param {string} [tmpDir]
- * @returns {Promise<VideoAnalyzeResponse>}
+ * @returns {Promise<VideoSwapResponse>}
  */
 export const analyzeVideo = async (sourcePaths, targetVideoPath, tmpDir) => {
 	const body = {
@@ -51,6 +53,15 @@ export const analyzeVideo = async (sourcePaths, targetVideoPath, tmpDir) => {
 	}
 	if (tmpDir) body.tmp_dir = tmpDir
 	const data = await request('POST', '/video/analyze', body)
+	return new VideoSwapResponse(data.job_id, data.status)
+}
+
+/**
+ * Parse raw analyze result data into VideoAnalyzeResponse
+ * @param {any} data
+ * @returns {VideoAnalyzeResponse}
+ */
+export const parseAnalyzeResult = (data) => {
 	return new VideoAnalyzeResponse(
 		data.session_id,
 		data.source_faces.map(FaceInfo.fromJSON),

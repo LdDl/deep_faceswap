@@ -16,9 +16,8 @@
 					   {isCurrent ? 'bg-accent ring-4 ring-accent/20' : isActive ? 'bg-accent' : 'bg-surface-3'}"
 			></div>
 			<span
-				class="text-xs transition-colors duration-200
-					   {isCurrent ? 'block text-accent font-medium' : 'hidden sm:block'}
-					   {isCurrent ? '' : isActive ? 'text-text-secondary' : 'text-text-muted'}"
+				class="text-[10px] sm:text-xs transition-colors duration-200
+					   {isCurrent ? 'text-accent font-medium' : isActive ? 'text-text-secondary' : 'text-text-muted'}"
 			>{step.label}</span>
 		</div>
 		<!-- Connector line -->

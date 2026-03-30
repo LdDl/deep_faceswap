@@ -275,9 +275,17 @@ The project includes a web-based interface built with SvelteKit + Tailwind CSS, 
 
 ### Showcase
 
-| Image swap |
+| Image swap (one to one) |
 :---:
-https://github.com/user-attachments/assets/b1069d2c-5dfa-4363-99ba-8fe855ce3b97
+https://github.com/user-attachments/assets/09568c8e-ab18-4c1a-9163-492692338619
+
+| Image swap (one to many) |
+:---:
+https://github.com/user-attachments/assets/4fa7a32a-6d4f-409a-b60c-82817262b286
+
+| Image swap (many to many) |
+:---:
+https://github.com/user-attachments/assets/82d1d32b-e6bb-4456-ae7b-d88389870831
 
 | Video swap |
 :---:

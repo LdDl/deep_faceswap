@@ -53,6 +53,7 @@
 			oninput={(e) => onchange(e.currentTarget.value)}
 		/>
 		<button
+			type="button"
 			class="px-3 py-2 bg-surface-2 hover:bg-surface-3 text-sm text-text-secondary hover:text-text-primary
 				   rounded-lg border border-border transition-colors shrink-0
 				   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
@@ -62,6 +63,7 @@
 		</button>
 		{#if onRemove}
 			<button
+				type="button"
 				class="px-2 py-2 text-sm rounded-lg border border-border transition-colors shrink-0
 					   {removeDisabled
 						? 'text-text-muted bg-surface-2 opacity-40 cursor-not-allowed'

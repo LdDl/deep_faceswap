@@ -5,6 +5,7 @@
 	import MediaPreview from '$lib/components/MediaPreview.svelte';
 	import FaceMapper from '$lib/components/FaceMapper.svelte';
 	import OptionsBar from '$lib/components/OptionsBar.svelte';
+	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import StepIndicator from '$lib/components/StepIndicator.svelte';
 	import { detectFaces } from '$lib/stores/detection.js';
 	import { swapImage } from '$lib/stores/swap.js';
@@ -66,10 +67,6 @@
 
 		try {
 			detection = await detectFaces(paths, targetPath);
-
-			if (detection.source_faces.length === 1 && detection.target_faces.length === 1) {
-				mappings = [new FaceMapping(0, 0)];
-			}
 
 			await tick();
 			mappingSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -178,6 +175,7 @@
 		<!-- Detect button — inside card -->
 		<div class="border-t border-border pt-4">
 			<button
+				type="button"
 				class="w-full sm:w-auto px-5 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed
 					   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
 					   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
@@ -189,63 +187,90 @@
 		</div>
 	</section>
 
-	<!-- Error -->
-	{#if error}
-		<div class="flex items-start gap-3 text-sm text-danger bg-danger/10 border border-danger/20 px-4 py-3 rounded-lg section-enter">
-			<span class="shrink-0 mt-0.5 font-bold">!</span>
-			<span class="flex-1 min-w-0">{error}</span>
-			<button
-				class="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-danger/60 hover:text-danger
-					   hover:bg-danger/10 rounded-md transition-colors
-					   focus-visible:ring-2 focus-visible:ring-danger/50"
-				onclick={() => (error = '')}
-				aria-label="Dismiss error"
-			>&times;</button>
+	<!-- Detect progress -->
+	<!-- Detect progress -->
+	<div class="grid-expand {detecting ? 'open' : ''}">
+		<div>
+			{#if detecting}
+				<section class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5">
+					<ProgressBar progress={{ stage: 'detecting_faces', current: 0, total: 0 }} />
+				</section>
+			{/if}
 		</div>
-	{/if}
+	</div>
+
+	<!-- Error -->
+	<div class="grid-expand {error ? 'open' : ''}">
+		<div>
+			{#if error}
+				<div role="alert" aria-live="assertive" class="flex items-start gap-3 text-sm text-danger bg-danger/10 border border-danger/20 px-4 py-3 rounded-lg">
+					<span class="shrink-0 mt-0.5 font-bold">!</span>
+					<span class="flex-1 min-w-0">{error}</span>
+					<button
+						type="button"
+						class="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-danger/60 hover:text-danger
+							   hover:bg-danger/10 rounded-md transition-colors
+							   focus-visible:ring-2 focus-visible:ring-danger/50"
+						onclick={() => (error = '')}
+						aria-label="Dismiss error"
+					>&times;</button>
+				</div>
+			{/if}
+		</div>
+	</div>
 
 	<!-- Face mapping card -->
-	{#if detection}
-		<section
-			bind:this={mappingSection}
-			class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-4 section-enter"
-			aria-busy={swapping}
-		>
-			<FaceMapper
-				sourceFaces={detection.source_faces}
-				targetItems={detection.target_faces}
-				mode="image"
-				onMappingsChange={(/** @type {FaceMapping[]} */ m) => (mappings = m)}
-			/>
-
-			<!-- Swap button — inside mapping card -->
-			<div class="border-t border-border pt-4">
-				<button
-					class="w-full sm:w-auto px-5 py-2.5 bg-success hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed
-						   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
-						   focus-visible:ring-2 focus-visible:ring-success/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
-					onclick={handleSwap}
-					disabled={swapping || mappings.length === 0}
+	<div class="grid-expand {detection ? 'open' : ''}">
+		<div>
+			{#if detection}
+				<section
+					bind:this={mappingSection}
+					class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-4"
+					aria-busy={swapping}
 				>
-					{swapping ? 'Swapping...' : 'Swap faces'}
-				</button>
-			</div>
-		</section>
-	{/if}
+					<FaceMapper
+						sourceFaces={detection.source_faces}
+						targetItems={detection.target_faces}
+						mode="image"
+						initialAutoMap={true}
+						onMappingsChange={(/** @type {FaceMapping[]} */ m) => (mappings = m)}
+					/>
+
+					<!-- Swap button — inside mapping card -->
+					<div class="border-t border-border pt-4">
+						<button
+							type="button"
+							class="w-full sm:w-auto px-5 py-2.5 bg-success hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed
+								   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
+								   focus-visible:ring-2 focus-visible:ring-success/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+							onclick={handleSwap}
+							disabled={swapping || mappings.length === 0}
+						>
+							{swapping ? 'Swapping...' : 'Swap faces'}
+						</button>
+					</div>
+				</section>
+			{/if}
+		</div>
+	</div>
 
 	<!-- Result card -->
-	{#if swapResult}
-		<section
-			bind:this={resultSection}
-			class="rounded-xl border border-success/30 bg-surface-1 p-4 sm:p-5 flex flex-col gap-3 section-enter"
-		>
-			<div class="flex items-center gap-2 text-sm text-success font-medium">
-				Swap completed in {swapResult.elapsed_s.toFixed(1)}s — {swapResult.faces_swapped} face(s) swapped
-			</div>
-			<div class="text-xs text-text-muted break-all">Output: {swapResult.output_path}</div>
-			<div class="w-full max-w-sm">
-				<MediaPreview path={swapResult.output_path} />
-			</div>
-		</section>
-	{/if}
+	<div class="grid-expand {swapResult ? 'open' : ''}">
+		<div>
+			{#if swapResult}
+				<section
+					bind:this={resultSection}
+					class="rounded-xl border border-success/30 bg-surface-1 p-4 sm:p-5 flex flex-col gap-3"
+				>
+					<div class="flex items-center gap-2 text-sm text-success font-medium">
+						Swap completed in {swapResult.elapsed_s.toFixed(1)}s — {swapResult.faces_swapped} face(s) swapped
+					</div>
+					<div class="text-xs text-text-muted break-all">Output: {swapResult.output_path}</div>
+					<div class="w-full max-w-sm">
+						<MediaPreview path={swapResult.output_path} />
+					</div>
+				</section>
+			{/if}
+		</div>
+	</div>
 </div>

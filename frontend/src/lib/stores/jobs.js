@@ -18,11 +18,14 @@ export class JobProgress {
 
 export class JobResult {
 	/**
-	 * @param {string} output_path
+	 * @param {string} [output_path]
+	 * @param {any} [data]
 	 */
-	constructor(output_path) {
-		/** @type {string} */
+	constructor(output_path, data) {
+		/** @type {string|undefined} */
 		this.output_path = output_path
+		/** @type {any} */
+		this.data = data
 	}
 }
 
@@ -55,10 +58,10 @@ export class JobState {
 export const getJobStatus = async (jobId) => {
 	const data = await request('GET', `/jobs/${encodeURIComponent(jobId)}`)
 	return new JobState(
-		data.job_id,
+		data.id,
 		data.status,
 		new JobProgress(data.progress.stage, data.progress.current, data.progress.total),
-		data.result ? new JobResult(data.result.output_path) : undefined,
+		data.result ? new JobResult(data.result.output_path, data.result.data) : undefined,
 		data.error
 	)
 }

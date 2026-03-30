@@ -1,6 +1,27 @@
 <script>
 	let { progress } = $props();
 
+	/** @type {Record<string, string>} */
+	const stageLabels = {
+		queued: 'Queued',
+		initializing: 'Initializing',
+		// image detect
+		detecting_faces: 'Detecting faces',
+		// analyze stages
+		detecting_source_faces: 'Detecting source faces',
+		extracting_frames: 'Extracting frames',
+		scanning_faces: 'Scanning faces',
+		clustering: 'Clustering faces',
+		// swap stages
+		processing_frames: 'Processing frames',
+		encoding: 'Encoding video',
+		// terminal
+		completed: 'Completed',
+		failed: 'Failed',
+	};
+
+	let stageLabel = $derived(stageLabels[progress.stage] || progress.stage);
+
 	let percent = $derived(
 		progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
 	);
@@ -10,7 +31,7 @@
 
 <div class="flex flex-col gap-1.5">
 	<div class="flex justify-between text-xs text-text-secondary">
-		<span class="capitalize">{progress.stage}</span>
+		<span>{stageLabel}</span>
 		{#if !isIndeterminate}
 			<span class="tabular-nums font-mono">{progress.current}/{progress.total} ({percent}%)</span>
 		{/if}
@@ -18,6 +39,7 @@
 	<div
 		class="w-full h-2 bg-surface-2 rounded-full overflow-hidden"
 		role="progressbar"
+		aria-label={stageLabel}
 		aria-valuenow={isIndeterminate ? undefined : percent}
 		aria-valuemin={0}
 		aria-valuemax={100}

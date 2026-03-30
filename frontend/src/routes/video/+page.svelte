@@ -7,11 +7,36 @@
 	import OptionsBar from '$lib/components/OptionsBar.svelte';
 	import ProgressBar from '$lib/components/ProgressBar.svelte';
 	import StepIndicator from '$lib/components/StepIndicator.svelte';
-	import { analyzeVideo, swapVideo } from '$lib/stores/video.js';
+	import { analyzeVideo, parseAnalyzeResult, swapVideo } from '$lib/stores/video.js';
 	import { getJobStatus } from '$lib/stores/jobs.js';
 	import { ClusterMapping } from '$lib/cluster_mapping.js';
 	import { VideoAnalyzeResponse } from '$lib/stores/video.js';
 	import { JobState } from '$lib/stores/jobs.js';
+
+	const FORM_KEY = 'video_form';
+
+	// Restore form state from localStorage
+	function loadForm() {
+		try {
+			const raw = localStorage.getItem(FORM_KEY);
+			if (!raw) return;
+			const f = JSON.parse(raw);
+			if (f.sourcePaths?.length) sourcePaths = f.sourcePaths;
+			if (f.targetVideoPath) targetVideoPath = f.targetVideoPath;
+			if (f.outputPath) outputPath = f.outputPath;
+			if (f.tmpDir) tmpDir = f.tmpDir;
+			if (f.enhance !== undefined) enhance = f.enhance;
+			if (f.mouthMask !== undefined) mouthMask = f.mouthMask;
+		} catch {
+			// ignore
+		}
+	}
+
+	function saveForm() {
+		localStorage.setItem(FORM_KEY, JSON.stringify({
+			sourcePaths, targetVideoPath, outputPath, tmpDir, enhance, mouthMask
+		}));
+	}
 
 	let sourcePaths = $state(['']);
 	let targetVideoPath = $state('');
@@ -20,36 +45,56 @@
 	let enhance = $state(true);
 	let mouthMask = $state(false);
 	let advancedOpen = $state(false);
+	let formLoaded = $state(false);
 
-	// Auto-generate tmp_dir from target video directory
+	// Auto-generate tmp_dir when target video path changes (user action, not restore)
+	let prevTargetVideo = '';
 	$effect(() => {
-		if (targetVideoPath.trim()) {
+		if (!formLoaded) return;
+		if (targetVideoPath.trim() && targetVideoPath !== prevTargetVideo) {
+			prevTargetVideo = targetVideoPath;
 			const lastSlash = targetVideoPath.lastIndexOf('/');
 			const dir = lastSlash > 0 ? targetVideoPath.substring(0, lastSlash) : '.';
 			tmpDir = dir + '/tmp_frames';
 		}
 	});
 
+	// Persist form whenever values change (after initial load), debounced
+	/** @type {ReturnType<typeof setTimeout>|null} */
+	let saveTimer = null;
+	$effect(() => {
+		if (!formLoaded) return;
+		// Access all reactive values to track them
+		sourcePaths; targetVideoPath; outputPath; tmpDir; enhance; mouthMask;
+		if (saveTimer) clearTimeout(saveTimer);
+		saveTimer = setTimeout(saveForm, 500);
+	});
+
 	/** @type {VideoAnalyzeResponse|null} */
 	let analysis = $state(null);
 	/** @type {ClusterMapping[]} */
 	let clusterMappings = $state([]);
-	/** @type {JobState|null} */
-	let job = $state(null);
 
-	let analyzing = $state(false);
+	/** @type {JobState|null} — analyze job */
+	let analyzeJob = $state(null);
+	/** @type {JobState|null} — swap job */
+	let swapJob = $state(null);
+
 	let starting = $state(false);
 	let error = $state('');
 
 	/** @type {ReturnType<typeof setInterval>|null} */
-	let pollTimer = null;
+	let analyzePollTimer = null;
+	/** @type {ReturnType<typeof setInterval>|null} */
+	let swapPollTimer = null;
 
 	/** @type {HTMLElement|undefined} */
 	let mappingSection = $state();
 	/** @type {HTMLElement|undefined} */
 	let resultSection = $state();
 
-	const ACTIVE_JOB_KEY = 'video_active_job';
+	const ANALYZE_JOB_KEY = 'video_analyze_job';
+	const SWAP_JOB_KEY = 'video_swap_job';
 
 	const steps = [
 		{ label: 'Setup' },
@@ -59,83 +104,195 @@
 		{ label: 'Result' }
 	];
 
+	let analyzing = $derived(
+		analyzeJob != null &&
+			(analyzeJob.status === 'queued' || analyzeJob.status === 'running')
+	);
+
 	let currentStep = $derived.by(() => {
-		if (job?.status === 'completed') return 4;
-		if (job?.status === 'running' || job?.status === 'queued' || starting) return 3;
+		if (swapJob?.status === 'completed') return 4;
+		if (swapJob?.status === 'running' || swapJob?.status === 'queued' || starting) return 3;
 		if (analysis && clusterMappings.length > 0) return 3;
 		if (analysis) return 2;
 		if (analyzing) return 1;
 		return 0;
 	});
 
+	// --- localStorage helpers ---
+
 	/**
-	 * Save active job info to localStorage for session recovery.
+	 * @param {string} key
 	 * @param {string} jobId
-	 * @param {string} outPath
+	 * @param {object} [extra]
 	 */
-	function saveActiveJob(jobId, outPath) {
-		localStorage.setItem(
-			ACTIVE_JOB_KEY,
-			JSON.stringify({
-				job_id: jobId,
-				output_path: outPath
-			})
-		);
+	function saveJob(key, jobId, extra) {
+		localStorage.setItem(key, JSON.stringify({ job_id: jobId, ...extra }));
 	}
 
-	function clearActiveJob() {
-		localStorage.removeItem(ACTIVE_JOB_KEY);
+	/** @param {string} key */
+	function clearJob(key) {
+		localStorage.removeItem(key);
 	}
 
-	// Recover a previously active job on page load
-	async function tryRecoverJob() {
-		const raw = localStorage.getItem(ACTIVE_JOB_KEY);
-		if (!raw) return;
+	const MAX_POLL_FAILURES = 3;
 
-		try {
-			const saved = JSON.parse(raw);
-			if (!saved.job_id) return;
+	/**
+	 * @param {string} jobId
+	 * @param {'analyze'|'swap'} type
+	 */
+	function startPolling(jobId, type) {
+		const isAnalyze = type === 'analyze';
+		// Clear existing timer for this type
+		if (isAnalyze && analyzePollTimer) clearInterval(analyzePollTimer);
+		if (!isAnalyze && swapPollTimer) clearInterval(swapPollTimer);
 
-			if (saved.output_path && !outputPath.trim()) {
-				outputPath = saved.output_path;
+		let failures = 0;
+		const timer = setInterval(async () => {
+			try {
+				const state = await getJobStatus(jobId);
+				failures = 0;
+				if (isAnalyze) {
+					analyzeJob = state;
+				} else {
+					swapJob = state;
+				}
+				if (state.status === 'completed' || state.status === 'failed') {
+					clearInterval(timer);
+					if (isAnalyze) analyzePollTimer = null;
+					else swapPollTimer = null;
+				}
+			} catch {
+				failures++;
+				if (failures >= MAX_POLL_FAILURES) {
+					clearInterval(timer);
+					if (isAnalyze) analyzePollTimer = null;
+					else swapPollTimer = null;
+					error = 'Lost connection to server. Please check the backend and retry.';
+				}
 			}
+		}, 2000);
 
-			const state = await getJobStatus(saved.job_id);
-			job = state;
-
-			if (state.status === 'completed' || state.status === 'failed') {
-				clearActiveJob();
-			} else {
-				startPolling(saved.job_id);
-			}
-		} catch {
-			clearActiveJob();
-		}
+		if (isAnalyze) analyzePollTimer = timer;
+		else swapPollTimer = timer;
 	}
 
 	$effect(() => {
-		if (job && (job.status === 'completed' || job.status === 'failed')) {
-			clearActiveJob();
+		if (analyzeJob?.status === 'completed' && analyzeJob.result?.data && !analysis) {
+			try {
+				analysis = parseAnalyzeResult(analyzeJob.result.data);
+				clearJob(ANALYZE_JOB_KEY);
+				tick().then(() => {
+					mappingSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				});
+			} catch (/** @type {any} */ e) {
+				error = 'Failed to parse analysis result: ' + (e.message || e);
+			}
 		}
 	});
 
-	// Auto-scroll to result when job completes
 	$effect(() => {
-		if (job?.status === 'completed') {
+		if (analyzeJob?.status === 'failed') {
+			error = analyzeJob.error || 'Analysis failed';
+			clearJob(ANALYZE_JOB_KEY);
+			if (!localStorage.getItem(SWAP_JOB_KEY)) {
+				localStorage.removeItem(FORM_KEY);
+			}
+		}
+	});
+
+	$effect(() => {
+		if (swapJob && (swapJob.status === 'completed' || swapJob.status === 'failed')) {
+			clearJob(SWAP_JOB_KEY);
+			// Clean up form persistence when all jobs are done
+			if (!localStorage.getItem(ANALYZE_JOB_KEY)) {
+				localStorage.removeItem(FORM_KEY);
+			}
+		}
+	});
+
+	// Auto-scroll to result when swap job completes
+	$effect(() => {
+		if (swapJob?.status === 'completed') {
 			tick().then(() => {
 				resultSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			});
 		}
 	});
 
+	async function tryRecoverJobs() {
+		let anyRecovered = false;
+
+		// Recover analyze job
+		const analyzeRaw = localStorage.getItem(ANALYZE_JOB_KEY);
+		if (analyzeRaw) {
+			try {
+				const saved = JSON.parse(analyzeRaw);
+				if (saved.job_id) {
+					const state = await getJobStatus(saved.job_id);
+					analyzeJob = state;
+					anyRecovered = true;
+					if (state.status !== 'completed' && state.status !== 'failed') {
+						startPolling(saved.job_id, 'analyze');
+					}
+				}
+			} catch {
+				clearJob(ANALYZE_JOB_KEY);
+			}
+		}
+
+		// Recover swap job
+		const swapRaw = localStorage.getItem(SWAP_JOB_KEY);
+		if (swapRaw) {
+			try {
+				const saved = JSON.parse(swapRaw);
+				if (saved.job_id) {
+					if (saved.output_path && !outputPath.trim()) {
+						outputPath = saved.output_path;
+					}
+					const state = await getJobStatus(saved.job_id);
+					swapJob = state;
+					anyRecovered = true;
+					if (state.status !== 'completed' && state.status !== 'failed') {
+						startPolling(saved.job_id, 'swap');
+					}
+				}
+			} catch {
+				clearJob(SWAP_JOB_KEY);
+			}
+		}
+
+		// If no jobs were recovered (server restarted, jobs lost), reset form to clean state
+		if (!anyRecovered && (analyzeRaw || swapRaw)) {
+			localStorage.removeItem(FORM_KEY);
+			sourcePaths = [''];
+			targetVideoPath = '';
+			outputPath = '';
+			tmpDir = '';
+			enhance = true;
+			mouthMask = false;
+		}
+	}
+
 	onMount(() => {
-		tryRecoverJob();
+		// Only restore form if there's an active job to recover
+		const hasActiveJob =
+			localStorage.getItem(ANALYZE_JOB_KEY) || localStorage.getItem(SWAP_JOB_KEY);
+		if (hasActiveJob) {
+			loadForm();
+			prevTargetVideo = targetVideoPath;
+		}
+		formLoaded = true;
+		tryRecoverJobs();
 	});
 
 	onDestroy(() => {
-		if (pollTimer) {
-			clearInterval(pollTimer);
-			pollTimer = null;
+		if (analyzePollTimer) {
+			clearInterval(analyzePollTimer);
+			analyzePollTimer = null;
+		}
+		if (swapPollTimer) {
+			clearInterval(swapPollTimer);
+			swapPollTimer = null;
 		}
 	});
 
@@ -147,20 +304,17 @@
 		}
 
 		error = '';
-		analyzing = true;
 		analysis = null;
-		job = null;
+		swapJob = null;
 		clusterMappings = [];
 
 		try {
-			analysis = await analyzeVideo(paths, targetVideoPath, tmpDir || undefined);
-
-			await tick();
-			mappingSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			const res = await analyzeVideo(paths, targetVideoPath, tmpDir || undefined);
+			analyzeJob = new JobState(res.job_id, 'queued', { stage: 'queued', current: 0, total: 0 });
+			startPolling(res.job_id, 'analyze');
+			saveJob(ANALYZE_JOB_KEY, res.job_id);
 		} catch (/** @type {any} */ e) {
-			error = e.error_text || e.message || 'Analysis failed';
-		} finally {
-			analyzing = false;
+			error = e.error_text || e.message || 'Failed to start analysis';
 		}
 	}
 
@@ -189,33 +343,14 @@
 				tmpDir || undefined
 			);
 
-			job = new JobState(res.job_id, 'queued', { stage: 'queued', current: 0, total: 0 });
-
-			startPolling(res.job_id);
-			saveActiveJob(res.job_id, outputPath);
+			swapJob = new JobState(res.job_id, 'queued', { stage: 'queued', current: 0, total: 0 });
+			startPolling(res.job_id, 'swap');
+			saveJob(SWAP_JOB_KEY, res.job_id, { output_path: outputPath });
 		} catch (/** @type {any} */ e) {
 			error = e.error_text || e.message || 'Failed to start swap';
 		} finally {
 			starting = false;
 		}
-	}
-
-	/** @param {string} jobId */
-	function startPolling(jobId) {
-		if (pollTimer) clearInterval(pollTimer);
-		pollTimer = setInterval(async () => {
-			try {
-				job = await getJobStatus(jobId);
-				if (job.status === 'completed' || job.status === 'failed') {
-					if (pollTimer) {
-						clearInterval(pollTimer);
-						pollTimer = null;
-					}
-				}
-			} catch {
-				// Ignore polling errors
-			}
-		}, 2000);
 	}
 
 	const imageExtensions = ['jpg', 'jpeg', 'png', 'bmp', 'webp'];
@@ -282,6 +417,7 @@
 
 			<!-- Advanced toggle for temp directory -->
 			<button
+				type="button"
 				class="flex items-center gap-1.5 py-2 text-xs text-text-muted hover:text-text-secondary transition-colors self-start
 				   focus-visible:ring-2 focus-visible:ring-accent/50 rounded-md"
 				onclick={() => (advancedOpen = !advancedOpen)}
@@ -312,6 +448,7 @@
 		<!-- Analyze button — inside card -->
 		<div class="border-t border-border pt-4">
 			<button
+				type="button"
 				class="w-full sm:w-auto px-5 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed
 					   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
 					   focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
@@ -323,85 +460,110 @@
 		</div>
 	</section>
 
-	<!-- Error -->
-	{#if error}
-		<div class="flex items-start gap-3 text-sm text-danger bg-danger/10 border border-danger/20 px-4 py-3 rounded-lg section-enter">
-			<span class="shrink-0 mt-0.5 font-bold">!</span>
-			<span class="flex-1 min-w-0">{error}</span>
-			<button
-				class="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-danger/60 hover:text-danger
-					   hover:bg-danger/10 rounded-md transition-colors
-					   focus-visible:ring-2 focus-visible:ring-danger/50"
-				onclick={() => (error = '')}
-				aria-label="Dismiss error"
-			>&times;</button>
+	<!-- Analyze progress card -->
+	<div class="grid-expand {analyzing && analyzeJob ? 'open' : ''}">
+		<div>
+			{#if analyzing && analyzeJob}
+				<section class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-3">
+					<ProgressBar progress={analyzeJob.progress} />
+				</section>
+			{/if}
 		</div>
-	{/if}
+	</div>
+
+	<!-- Error -->
+	<div class="grid-expand {error ? 'open' : ''}">
+		<div>
+			{#if error}
+				<div role="alert" aria-live="assertive" class="flex items-start gap-3 text-sm text-danger bg-danger/10 border border-danger/20 px-4 py-3 rounded-lg">
+					<span class="shrink-0 mt-0.5 font-bold">!</span>
+					<span class="flex-1 min-w-0">{error}</span>
+					<button
+						type="button"
+						class="shrink-0 w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center text-danger/60 hover:text-danger
+							   hover:bg-danger/10 rounded-md transition-colors
+							   focus-visible:ring-2 focus-visible:ring-danger/50"
+						onclick={() => (error = '')}
+						aria-label="Dismiss error"
+					>&times;</button>
+				</div>
+			{/if}
+		</div>
+	</div>
 
 	<!-- Analysis results + mapper card -->
-	{#if analysis}
-		<section
-			bind:this={mappingSection}
-			class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-4 section-enter"
-			aria-busy={starting}
-		>
-			<div class="text-sm text-text-secondary">
-				{analysis.total_frames} frames, analyzed in {analysis.elapsed_s.toFixed(1)}s —
-				{analysis.clusters.length} cluster(s) found
-			</div>
-
-			<FaceMapper
-				sourceFaces={analysis.source_faces}
-				targetItems={analysis.clusters}
-				mode="video"
-				onMappingsChange={(/** @type {ClusterMapping[]} */ m) => (clusterMappings = m)}
-			/>
-
-			{#if !job}
-				<!-- Start swap button — inside mapping card -->
-				<div class="border-t border-border pt-4">
-					<button
-						class="w-full sm:w-auto px-5 py-2.5 bg-success hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed
-							   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
-							   focus-visible:ring-2 focus-visible:ring-success/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
-						onclick={handleStartSwap}
-						disabled={starting || clusterMappings.length === 0}
-					>
-						{starting ? 'Starting...' : 'Start swap'}
-					</button>
-				</div>
-			{/if}
-		</section>
-	{/if}
-
-	<!-- Job progress / result card -->
-	{#if job}
-		<section
-			bind:this={resultSection}
-			class="rounded-xl border {job.status === 'completed' ? 'border-success/30' : job.status === 'failed' ? 'border-danger/30' : 'border-border'}
-				   bg-surface-1 p-4 sm:p-5 flex flex-col gap-3 section-enter"
-		>
-			{#if job.status === 'queued' || job.status === 'running'}
-				<ProgressBar progress={job.progress} />
-			{/if}
-
-			{#if job.status === 'completed'}
-				<div class="flex items-center gap-2 text-sm text-success font-medium">
-					Video swap completed
-				</div>
-				{#if job.result}
-					<div class="text-xs text-text-muted break-all">Output: {job.result.output_path}</div>
-					<div class="w-full max-w-sm">
-						<MediaPreview path={job.result.output_path} type="video" />
+	<div class="grid-expand {analysis ? 'open' : ''}">
+		<div>
+			{#if analysis}
+				<section
+					bind:this={mappingSection}
+					class="rounded-xl border border-border bg-surface-1 p-4 sm:p-5 flex flex-col gap-4"
+					aria-busy={starting}
+				>
+					<div class="text-sm text-text-secondary">
+						{analysis.total_frames} frames, analyzed in {analysis.elapsed_s.toFixed(1)}s —
+						{analysis.clusters.length} cluster(s) found
 					</div>
-				{/if}
-			{/if}
 
-			{#if job.status === 'failed'}
-				<div class="text-sm text-danger">
-					Video swap failed{job.error ? `: ${job.error}` : ''}
-				</div>
+					<FaceMapper
+						sourceFaces={analysis.source_faces}
+						targetItems={analysis.clusters}
+						mode="video"
+						onMappingsChange={(/** @type {ClusterMapping[]} */ m) => (clusterMappings = m)}
+					/>
+
+					{#if !swapJob || swapJob.status === 'failed'}
+						<!-- Start swap button — inside mapping card -->
+						<div class="border-t border-border pt-4">
+							<button
+								type="button"
+								class="w-full sm:w-auto px-5 py-2.5 bg-success hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed
+									   text-white rounded-lg text-sm font-medium transition-colors shadow-sm
+									   focus-visible:ring-2 focus-visible:ring-success/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+								onclick={handleStartSwap}
+								disabled={starting || clusterMappings.length === 0}
+							>
+								{starting ? 'Starting...' : 'Start swap'}
+							</button>
+						</div>
+					{/if}
+				</section>
 			{/if}
-		</section>
-	{/if}
+		</div>
+	</div>
+
+	<!-- Swap job progress / result card -->
+	<div class="grid-expand {swapJob ? 'open' : ''}">
+		<div>
+			{#if swapJob}
+				<section
+					bind:this={resultSection}
+					class="rounded-xl border {swapJob.status === 'completed' ? 'border-success/30' : swapJob.status === 'failed' ? 'border-danger/30' : 'border-border'}
+						   bg-surface-1 p-4 sm:p-5 flex flex-col gap-3"
+				>
+					{#if swapJob.status === 'queued' || swapJob.status === 'running'}
+						<ProgressBar progress={swapJob.progress} />
+					{/if}
+
+					{#if swapJob.status === 'completed'}
+						<div class="flex items-center gap-2 text-sm text-success font-medium">
+							Video swap completed
+						</div>
+						{#if swapJob.result?.output_path}
+							<div class="text-xs text-text-muted break-all">Output: {swapJob.result.output_path}</div>
+							<div class="w-full max-w-sm">
+								<MediaPreview path={swapJob.result.output_path} type="video" />
+							</div>
+						{/if}
+					{/if}
+
+					{#if swapJob.status === 'failed'}
+						<div class="text-sm text-danger">
+							Video swap failed{swapJob.error ? `: ${swapJob.error}` : ''}
+						</div>
+					{/if}
+				</section>
+			{/if}
+		</div>
+	</div>
 </div>
