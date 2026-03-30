@@ -25,7 +25,12 @@ pub struct JobProgress {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct JobResult {
     #[schema(example = "/home/user/output.mp4")]
-    pub output_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
+    /// Arbitrary result payload (e.g. video analyze response)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Object)]
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

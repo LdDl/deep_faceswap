@@ -94,6 +94,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             crate::services::swap_image::SwapImageResponse,
             crate::services::video::VideoAnalyzeRequest,
             crate::services::video::VideoAnalyzeResponse,
+            crate::services::video::VideoAnalyzeJobResponse,
             crate::services::video::VideoSwapRequest,
             crate::services::video::VideoSwapResponse,
             crate::services::video::ClusterInfo,

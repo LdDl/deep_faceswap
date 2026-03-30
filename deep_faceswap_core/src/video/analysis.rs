@@ -61,6 +61,16 @@ pub fn scan_frames_for_faces(
     detector: &mut FaceDetector,
     recognizer: &mut FaceRecognizer,
 ) -> Result<Vec<FaceRecord>> {
+    scan_frames_for_faces_with_progress(frame_paths, detector, recognizer, None)
+}
+
+/// Scan all video frames and extract face embeddings, with optional progress callback
+pub fn scan_frames_for_faces_with_progress(
+    frame_paths: &[String],
+    detector: &mut FaceDetector,
+    recognizer: &mut FaceRecognizer,
+    progress_cb: Option<&dyn Fn(usize, usize)>,
+) -> Result<Vec<FaceRecord>> {
     log_main!(
         "video_analysis",
         "Scanning all frames for faces",
@@ -103,6 +113,9 @@ pub fn scan_frames_for_faces(
                 total = frame_paths.len(),
                 faces_found = face_records.len()
             );
+            if let Some(cb) = &progress_cb {
+                cb(frame_idx + 1, frame_paths.len());
+            }
         }
     }
 
