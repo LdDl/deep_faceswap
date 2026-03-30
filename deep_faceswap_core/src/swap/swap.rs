@@ -815,6 +815,13 @@ pub fn swap_video_frames_with_mappings(
     let log_interval = std::cmp::max(10, total_frames / 10);
     let processing_start = Instant::now();
 
+    log_main!(
+        "video_processing",
+        "Processing frames started",
+        total_frames = total_frames,
+        mappings = cluster_mappings.len()
+    );
+
     for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
         let frame_img = img_io::load_image(frame_path)?;
         let frame_rgb = img_io::to_rgb8(&frame_img);
