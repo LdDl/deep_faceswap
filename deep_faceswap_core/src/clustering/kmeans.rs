@@ -1,30 +1,34 @@
 //! K-means clustering for face embeddings
 //!
-//! Implementation based on Lloyd's algorithm with multiple random restarts,
-//! matching sklearn.cluster.KMeans(n_init=10) behavior.
+//! Optimized implementation with:
+//! - K-means++ initialization for faster convergence
+//! - Sampled silhouette score for O(S^2) instead of O(N^2) model selection
+//! - Single-pass centroid updates and pre-computed norms
 //!
 //! For L2-normalized embeddings (like ArcFace), Euclidean distance and cosine
 //! similarity are equivalent: ||a-b||^2 = 2(1 - cos(a,b)). This means standard
 //! Euclidean K-means produces the same clusters as spherical K-means.
-//!
-//! References:
-//! - K-means algorithm: https://en.wikipedia.org/wiki/K-means_clustering
-//! - Silhouette score: https://en.wikipedia.org/wiki/Silhouette_(clustering)
-//! - sklearn.cluster.KMeans: https://scikit-learn.org/stable/modules/generated/sklearn.cluster.KMeans.html
 
 use crate::types::{FaceSwapError, Result};
 use ndarray::{Array1, Array2};
+use rand::seq::SliceRandom;
 use rand::Rng;
 
-/// Number of independent K-means runs with different random initializations.
-/// The run with lowest inertia (sum of squared distances to centroids) wins.
-/// Matches sklearn's default n_init=10.
-const N_INIT: usize = 10;
+/// Number of independent K-means runs for the final clustering.
+const N_INIT_FINAL: usize = 10;
+
+/// Fewer restarts during K-selection (rough clustering is sufficient for silhouette comparison).
+const N_INIT_SELECTION: usize = 3;
+
+/// Maximum samples used for silhouette score estimation.
+/// 2000 is more than enough for stable K selection with K <= 10.
+const SILHOUETTE_SAMPLE_SIZE: usize = 2000;
 
 /// Perform K-means clustering on face embeddings with multiple restarts
 ///
-/// Runs K-means N_INIT times with different random seeds and returns the
+/// Runs K-means N_INIT_FINAL times with different random seeds and returns the
 /// centroids from the run with lowest inertia (best fit).
+/// Uses K-means++ initialization for faster convergence.
 ///
 /// # Arguments
 /// * `embeddings` - Face embeddings (N x D matrix, where N=faces, D=embedding_dim)
@@ -52,7 +56,16 @@ pub fn kmeans_cluster(
     k: usize,
     max_iterations: usize,
 ) -> Result<Array2<f32>> {
-    let (n_samples, n_features) = embeddings.dim();
+    kmeans_cluster_with_restarts(embeddings, k, max_iterations, N_INIT_FINAL)
+}
+
+fn kmeans_cluster_with_restarts(
+    embeddings: &Array2<f32>,
+    k: usize,
+    max_iterations: usize,
+    n_init: usize,
+) -> Result<Array2<f32>> {
+    let (n_samples, _) = embeddings.dim();
 
     if n_samples == 0 {
         return Err(FaceSwapError::ProcessingError(
@@ -70,9 +83,8 @@ pub fn kmeans_cluster(
     let mut best_centroids = None;
     let mut best_inertia = f32::INFINITY;
 
-    for _ in 0..N_INIT {
-        let (centroids, inertia) =
-            kmeans_single_run(embeddings, k, n_samples, n_features, max_iterations)?;
+    for _ in 0..n_init {
+        let (centroids, inertia) = kmeans_single_run(embeddings, k, max_iterations)?;
 
         if inertia < best_inertia {
             best_inertia = inertia;
@@ -85,35 +97,39 @@ pub fn kmeans_cluster(
     })
 }
 
-/// Single K-means run with random initialization
+/// Single K-means run with K-means++ initialization
 ///
 /// Returns (centroids, inertia) where inertia is the sum of squared
 /// Euclidean distances from each point to its assigned centroid.
+/// Uses pre-computed centroid norms and single-pass centroid updates
+/// for optimal performance.
 fn kmeans_single_run(
     embeddings: &Array2<f32>,
     k: usize,
-    n_samples: usize,
-    n_features: usize,
     max_iterations: usize,
 ) -> Result<(Array2<f32>, f32)> {
-    let mut rng = rand::thread_rng();
-    let mut centroids = Array2::<f32>::zeros((k, n_features));
-    let mut indices: Vec<usize> = (0..n_samples).collect();
+    let (n_samples, n_features) = embeddings.dim();
 
-    // Initialize centroids randomly from data points
-    for i in 0..k {
-        let idx = rng.gen_range(i..n_samples);
-        indices.swap(i, idx);
-        centroids.row_mut(i).assign(&embeddings.row(indices[i]));
-    }
+    // K-means++ initialization
+    let mut centroids = kmeans_pp_init(embeddings, k);
 
+    // Pre-allocate buffers reused across iterations
     let mut labels = vec![0usize; n_samples];
     let mut prev_labels = vec![usize::MAX; n_samples];
+    let mut centroid_norms = vec![0.0f32; k];
+    let mut accum = Array2::<f32>::zeros((k, n_features));
+    let mut counts = vec![0usize; k];
 
     for _iteration in 0..max_iterations {
-        // Assignment step: assign each point to nearest centroid
+        // Pre-compute centroid norms once per iteration
+        for c in 0..k {
+            centroid_norms[c] = centroids.row(c).dot(&centroids.row(c)).sqrt();
+        }
+
+        // Assignment step: assign each point to nearest centroid using pre-computed norms
         for i in 0..n_samples {
-            labels[i] = nearest_centroid_idx(&centroids, &embeddings.row(i), k);
+            labels[i] =
+                nearest_centroid_idx_fast(&centroids, &centroid_norms, &embeddings.row(i), k);
         }
 
         // Check convergence
@@ -122,42 +138,100 @@ fn kmeans_single_run(
         }
         prev_labels.clone_from(&labels);
 
-        // Update step: recalculate centroids as mean of assigned points
-        for cluster_id in 0..k {
-            let mut sum = Array1::<f32>::zeros(n_features);
-            let mut count = 0usize;
+        // Single-pass centroid update
+        accum.fill(0.0);
+        counts.fill(0);
 
-            for (idx, &label) in labels.iter().enumerate() {
-                if label == cluster_id {
-                    sum += &embeddings.row(idx);
-                    count += 1;
-                }
+        for (idx, &label) in labels.iter().enumerate() {
+            let row = embeddings.row(idx);
+            let acc_row = accum.row_mut(label);
+            // Manual element-wise add to avoid ndarray allocation
+            let acc_slice = acc_row.into_slice().unwrap();
+            let row_slice = row.as_slice().unwrap();
+            for j in 0..n_features {
+                acc_slice[j] += row_slice[j];
             }
+            counts[label] += 1;
+        }
 
-            if count > 0 {
-                sum /= count as f32;
-                centroids.row_mut(cluster_id).assign(&sum);
+        for c in 0..k {
+            if counts[c] > 0 {
+                let inv = 1.0 / counts[c] as f32;
+                let mut row = centroids.row_mut(c);
+                let acc = accum.row(c);
+                for j in 0..n_features {
+                    row[j] = acc[j] * inv;
+                }
             }
         }
     }
 
-    // Calculate inertia (sum of squared distances to assigned centroids)
+    // Calculate inertia without allocating diff vectors
     let mut inertia = 0.0f32;
     for i in 0..n_samples {
-        let centroid = centroids.row(labels[i]);
-        let diff = &embeddings.row(i) - &centroid;
-        inertia += diff.dot(&diff);
+        inertia += euclidean_distance_sq(&embeddings.row(i), &centroids.row(labels[i]));
     }
 
     Ok((centroids, inertia))
 }
 
-/// Find index of nearest centroid using cosine similarity
+/// K-means++ initialization: pick centroids with D^2 weighting
 ///
-/// Used internally during K-means iteration. For L2-normalized embeddings,
-/// maximizing cosine similarity is equivalent to minimizing Euclidean distance.
-fn nearest_centroid_idx(
+/// First centroid is chosen uniformly at random. Each subsequent centroid
+/// is chosen with probability proportional to squared distance to nearest
+/// existing centroid. This gives O(log k)-competitive initialization.
+///
+/// Reference: Arthur & Vassilvitskii, "k-means++: The Advantages of Careful Seeding", 2007
+fn kmeans_pp_init(embeddings: &Array2<f32>, k: usize) -> Array2<f32> {
+    let (n_samples, n_features) = embeddings.dim();
+    let mut rng = rand::thread_rng();
+    let mut centroids = Array2::<f32>::zeros((k, n_features));
+
+    // First centroid: random
+    let first = rng.gen_range(0..n_samples);
+    centroids.row_mut(0).assign(&embeddings.row(first));
+
+    // Distance from each point to nearest chosen centroid
+    let mut min_dist = vec![f32::INFINITY; n_samples];
+
+    for c in 1..k {
+        // Update min distances with the last added centroid
+        let last_centroid = centroids.row(c - 1);
+        for i in 0..n_samples {
+            let d = euclidean_distance_sq(&embeddings.row(i), &last_centroid);
+            if d < min_dist[i] {
+                min_dist[i] = d;
+            }
+        }
+
+        // Weighted random selection proportional to D^2
+        let total: f32 = min_dist.iter().sum();
+        if total == 0.0 {
+            // All remaining points are on top of existing centroids
+            centroids.row_mut(c).assign(&embeddings.row(rng.gen_range(0..n_samples)));
+            continue;
+        }
+
+        let threshold = rng.gen::<f32>() * total;
+        let mut cumsum = 0.0;
+        let mut chosen = 0;
+        for (i, &d) in min_dist.iter().enumerate() {
+            cumsum += d;
+            if cumsum >= threshold {
+                chosen = i;
+                break;
+            }
+        }
+        centroids.row_mut(c).assign(&embeddings.row(chosen));
+    }
+
+    centroids
+}
+
+/// Fast nearest centroid using pre-computed norms (cosine similarity)
+fn nearest_centroid_idx_fast(
     centroids: &Array2<f32>,
+    centroid_norms: &[f32],
     embedding: &ndarray::ArrayView1<f32>,
     k: usize,
 ) -> usize {
@@ -170,13 +244,12 @@ fn nearest_centroid_idx(
     let mut best_similarity = f32::NEG_INFINITY;
 
     for i in 0..k {
-        let centroid = centroids.row(i);
-        let cent_norm = centroid.dot(&centroid).sqrt();
-        if cent_norm == 0.0 {
+        let cn = centroid_norms[i];
+        if cn == 0.0 {
             continue;
         }
 
-        let similarity = embedding.dot(&centroid) / (emb_norm * cent_norm);
+        let similarity = embedding.dot(&centroids.row(i)) / (emb_norm * cn);
 
         if similarity > best_similarity {
             best_similarity = similarity;
@@ -251,10 +324,63 @@ pub fn find_nearest_centroid(
     Ok((best_idx, best_similarity))
 }
 
-/// Select optimal number of clusters using silhouette score
+/// Find nearest centroid for an embedding view using cosine similarity
+///
+/// Same as [`find_nearest_centroid`] but accepts an `ArrayView1` instead
+/// of `Array1`, avoiding unnecessary allocation when working with
+/// matrix row views.
+///
+/// # Arguments
+/// * `centroids` - Centroids matrix (K x D)
+/// * `embedding` - Face embedding view (D-dimensional)
+///
+/// # Returns
+/// (cluster_id, similarity_score)
+pub fn find_nearest_centroid_view(
+    centroids: &Array2<f32>,
+    embedding: &ndarray::ArrayView1<f32>,
+) -> Result<(usize, f32)> {
+    let (k, _) = centroids.dim();
+
+    if k == 0 {
+        return Err(FaceSwapError::ProcessingError(
+            "No centroids provided".to_string(),
+        ));
+    }
+
+    let emb_norm = embedding.dot(embedding).sqrt();
+    if emb_norm == 0.0 {
+        return Err(FaceSwapError::ProcessingError(
+            "Zero embedding vector".to_string(),
+        ));
+    }
+
+    let mut best_idx = 0;
+    let mut best_similarity = f32::NEG_INFINITY;
+
+    for i in 0..k {
+        let centroid = centroids.row(i);
+        let cent_norm = centroid.dot(&centroid).sqrt();
+        if cent_norm == 0.0 {
+            continue;
+        }
+
+        let similarity = embedding.dot(&centroid) / (emb_norm * cent_norm);
+
+        if similarity > best_similarity {
+            best_similarity = similarity;
+            best_idx = i;
+        }
+    }
+
+    Ok((best_idx, best_similarity))
+}
+
+/// Select optimal number of clusters using sampled silhouette score
 ///
 /// Tries K from 2 to max_k, runs K-means for each, and picks the K with
-/// the highest silhouette score.
+/// the highest silhouette score. Uses fewer restarts (N_INIT_SELECTION=3)
+/// and sampled silhouette (SILHOUETTE_SAMPLE_SIZE=2000) for fast model selection.
 ///
 /// # Arguments
 /// * `embeddings` - Face embeddings (N x D)
@@ -292,8 +418,9 @@ pub fn select_optimal_k(embeddings: &Array2<f32>, max_k: usize) -> Result<usize>
     let mut best_score = f32::NEG_INFINITY;
 
     for k in 2..=max_k {
-        let centroids = kmeans_cluster(embeddings, k, 100)?;
-        let score = calculate_silhouette_score(embeddings, &centroids)?;
+        let centroids =
+            kmeans_cluster_with_restarts(embeddings, k, 100, N_INIT_SELECTION)?;
+        let score = calculate_silhouette_score_sampled(embeddings, &centroids)?;
 
         if score > best_score {
             best_score = score;
@@ -304,63 +431,118 @@ pub fn select_optimal_k(embeddings: &Array2<f32>, max_k: usize) -> Result<usize>
     Ok(best_k)
 }
 
-/// Calculate silhouette score for clustering quality evaluation
+/// Sampled silhouette score for clustering quality evaluation
 ///
-/// For each sample, computes:
+/// For each sample point, computes:
 /// - a(i): mean distance to other points in the same cluster
 /// - b(i): mean distance to points in the nearest other cluster
 /// - s(i) = (b(i) - a(i)) / max(a(i), b(i))
 ///
-/// Returns the mean s(i) across all samples. Range: [-1, 1].
+/// Returns the mean s(i) across all sampled points. Range: [-1, 1].
 /// Higher is better: 1 = well-separated, 0 = overlapping, -1 = misclassified.
-fn calculate_silhouette_score(embeddings: &Array2<f32>, centroids: &Array2<f32>) -> Result<f32> {
-    let (n_samples, _) = embeddings.dim();
+///
+/// When N > SILHOUETTE_SAMPLE_SIZE, randomly subsamples to keep runtime
+/// at O(S^2 · D) instead of O(N^2 · D). This matches sklearn's
+/// `silhouette_score(sample_size=...)` approach.
+fn calculate_silhouette_score_sampled(
+    embeddings: &Array2<f32>,
+    centroids: &Array2<f32>,
+) -> Result<f32> {
+    let (n_samples, n_features) = embeddings.dim();
     let (k, _) = centroids.dim();
 
-    // Assign labels
-    let mut labels = vec![0usize; n_samples];
-    for i in 0..n_samples {
-        labels[i] = nearest_centroid_idx(centroids, &embeddings.row(i), k);
+    // Subsample if dataset is large
+    let sample_size = n_samples.min(SILHOUETTE_SAMPLE_SIZE);
+
+    let (sample_embeddings, sample_labels) = if sample_size < n_samples {
+        // Random sample without replacement
+        let mut rng = rand::thread_rng();
+        let mut indices: Vec<usize> = (0..n_samples).collect();
+        indices.shuffle(&mut rng);
+        indices.truncate(sample_size);
+
+        // Build subsampled embeddings matrix
+        let mut sub = Array2::<f32>::zeros((sample_size, n_features));
+        for (row_idx, &idx) in indices.iter().enumerate() {
+            let row_view = embeddings.row(idx);
+            let src = row_view.as_slice().unwrap();
+            let dst = sub.row_mut(row_idx).into_slice().unwrap();
+            dst.copy_from_slice(src);
+        }
+
+        // Assign labels
+        let mut centroid_norms = vec![0.0f32; k];
+        for c in 0..k {
+            centroid_norms[c] = centroids.row(c).dot(&centroids.row(c)).sqrt();
+        }
+        let labels: Vec<usize> = (0..sample_size)
+            .map(|i| nearest_centroid_idx_fast(centroids, &centroid_norms, &sub.row(i), k))
+            .collect();
+
+        (sub, labels)
+    } else {
+        // Use all samples
+        let mut centroid_norms = vec![0.0f32; k];
+        for c in 0..k {
+            centroid_norms[c] = centroids.row(c).dot(&centroids.row(c)).sqrt();
+        }
+        let labels: Vec<usize> = (0..n_samples)
+            .map(|i| {
+                nearest_centroid_idx_fast(centroids, &centroid_norms, &embeddings.row(i), k)
+            })
+            .collect();
+
+        // Clone the embeddings view — needed for uniform return type
+        (embeddings.to_owned(), labels)
+    };
+
+    let n = sample_labels.len();
+
+    // Pre-compute cluster membership lists for O(1) iteration per cluster
+    let mut cluster_members: Vec<Vec<usize>> = vec![Vec::new(); k];
+    for (i, &label) in sample_labels.iter().enumerate() {
+        if label < k {
+            cluster_members[label].push(i);
+        }
     }
 
-    let mut silhouette_sum = 0.0;
+    let mut silhouette_sum = 0.0f64; // f64 for accumulation stability
 
-    for i in 0..n_samples {
-        let own_cluster = labels[i];
-        let point = embeddings.row(i);
+    for i in 0..n {
+        let own_cluster = sample_labels[i];
+        let point = sample_embeddings.row(i);
 
-        // Average distance to own cluster (a)
-        let mut a = 0.0;
-        let mut count_a = 0;
-        for j in 0..n_samples {
-            if i != j && labels[j] == own_cluster {
-                a += euclidean_distance(&point, &embeddings.row(j));
-                count_a += 1;
-            }
-        }
+        // a(i): mean distance to own cluster members
+        let own_members = &cluster_members[own_cluster];
+        let mut a = 0.0f64;
+        let count_a = own_members.len() - 1; // exclude self
         if count_a > 0 {
-            a /= count_a as f32;
+            for &j in own_members {
+                if j != i {
+                    a += euclidean_distance_sq(&point, &sample_embeddings.row(j)).sqrt() as f64;
+                }
+            }
+            a /= count_a as f64;
         }
 
-        // Minimum average distance to other clusters (b)
-        let mut b = f32::INFINITY;
+        // b(i): min average distance to other clusters
+        let mut b = f64::INFINITY;
         for other_cluster in 0..k {
             if other_cluster == own_cluster {
                 continue;
             }
-
-            let mut cluster_dist = 0.0;
-            let mut count_b = 0;
-            for j in 0..n_samples {
-                if labels[j] == other_cluster {
-                    cluster_dist += euclidean_distance(&point, &embeddings.row(j));
-                    count_b += 1;
-                }
+            let members = &cluster_members[other_cluster];
+            if members.is_empty() {
+                continue;
             }
-
-            if count_b > 0 {
-                cluster_dist /= count_b as f32;
-                b = b.min(cluster_dist);
+            let mut cluster_dist = 0.0f64;
+            for &j in members {
+                cluster_dist +=
+                    euclidean_distance_sq(&point, &sample_embeddings.row(j)).sqrt() as f64;
+            }
+            cluster_dist /= members.len() as f64;
+            if cluster_dist < b {
+                b = cluster_dist;
             }
         }
 
@@ -375,7 +557,7 @@ fn calculate_silhouette_score(embeddings: &Array2<f32>, centroids: &Array2<f32>)
         silhouette_sum += s_i;
     }
 
-    Ok(silhouette_sum / n_samples as f32)
+    Ok((silhouette_sum / n as f64) as f32)
 }
 
 /// Squared Euclidean distance between two vectors (no sqrt, no allocation)
@@ -387,11 +569,6 @@ fn euclidean_distance_sq(a: &ndarray::ArrayView1<f32>, b: &ndarray::ArrayView1<f
             d * d
         })
         .sum()
-}
-
-/// Euclidean distance between two vectors (no allocation)
-fn euclidean_distance(a: &ndarray::ArrayView1<f32>, b: &ndarray::ArrayView1<f32>) -> f32 {
-    euclidean_distance_sq(a, b).sqrt()
 }
 
 #[cfg(test)]
@@ -409,7 +586,6 @@ mod tests {
 
     #[test]
     fn test_find_nearest() {
-        // Two centroids pointing in different directions
         let centroids = Array2::from_shape_vec((2, 2), vec![1.0, 0.0, 0.0, 1.0]).unwrap();
         let emb = Array1::from_vec(vec![0.9, 0.1]);
 
@@ -419,14 +595,10 @@ mod tests {
 
     #[test]
     fn test_kmeans_convergence() {
-        // Two well-separated clusters of normalized vectors
         let embeddings = Array2::from_shape_vec(
             (6, 2),
             vec![
-                // Group A: vectors pointing roughly toward (1, 0)
-                0.99, 0.14, 0.97, 0.24, 0.95, 0.31,
-                // Group B: vectors pointing roughly toward (0, 1)
-                0.14, 0.99, 0.24, 0.97, 0.31, 0.95,
+                0.99, 0.14, 0.97, 0.24, 0.95, 0.31, 0.14, 0.99, 0.24, 0.97, 0.31, 0.95,
             ],
         )
         .unwrap();
@@ -434,7 +606,6 @@ mod tests {
         let centroids = kmeans_cluster(&embeddings, 2, 100).unwrap();
         assert_eq!(centroids.dim(), (2, 2));
 
-        // Each point should be assigned to its correct cluster
         for i in 0..3 {
             let (idx_a, _) =
                 find_nearest_centroid(&centroids, &embeddings.row(i).to_owned()).unwrap();
@@ -449,16 +620,11 @@ mod tests {
 
     #[test]
     fn test_select_optimal_k() {
-        // Three distinct clusters
         let embeddings = Array2::from_shape_vec(
             (9, 2),
             vec![
-                // Cluster A: near (1, 0)
-                1.0, 0.0, 0.98, 0.05, 0.95, 0.1,
-                // Cluster B: near (0, 1)
-                0.0, 1.0, 0.05, 0.98, 0.1, 0.95,
-                // Cluster C: near (-1, 0)
-                -1.0, 0.0, -0.98, 0.05, -0.95, 0.1,
+                1.0, 0.0, 0.98, 0.05, 0.95, 0.1, 0.0, 1.0, 0.05, 0.98, 0.1, 0.95, -1.0, 0.0,
+                -0.98, 0.05, -0.95, 0.1,
             ],
         )
         .unwrap();
@@ -469,15 +635,48 @@ mod tests {
 
     #[test]
     fn test_multiple_restarts_stability() {
-        // With n_init=10, repeated calls should give similar inertia
         let embeddings =
-            Array2::from_shape_vec((4, 2), vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, -1.0]).unwrap();
+            Array2::from_shape_vec((4, 2), vec![1.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, -1.0])
+                .unwrap();
 
         let c1 = kmeans_cluster(&embeddings, 2, 50).unwrap();
         let c2 = kmeans_cluster(&embeddings, 2, 50).unwrap();
 
-        // Both runs should produce 2 centroids
         assert_eq!(c1.dim(), (2, 2));
         assert_eq!(c2.dim(), (2, 2));
+    }
+
+    #[test]
+    fn test_kmeans_pp_init() {
+        let embeddings = Array2::from_shape_vec(
+            (6, 2),
+            vec![1.0, 0.0, 0.9, 0.1, 0.0, 1.0, 0.1, 0.9, -1.0, 0.0, -0.9, -0.1],
+        )
+        .unwrap();
+
+        let centroids = kmeans_pp_init(&embeddings, 3);
+        assert_eq!(centroids.dim(), (3, 2));
+
+        // All centroids should be non-zero (selected from data)
+        for c in 0..3 {
+            let norm = centroids.row(c).dot(&centroids.row(c));
+            assert!(norm > 0.0, "Centroid {} should be non-zero", c);
+        }
+    }
+
+    #[test]
+    fn test_sampled_silhouette_small_dataset() {
+        // For small datasets (< SILHOUETTE_SAMPLE_SIZE), sampled = exact
+        let embeddings = Array2::from_shape_vec(
+            (6, 2),
+            vec![1.0, 0.0, 0.9, 0.1, 0.0, 1.0, 0.1, 0.9, -1.0, 0.0, -0.9, -0.1],
+        )
+        .unwrap();
+
+        let centroids = kmeans_cluster(&embeddings, 2, 100).unwrap();
+        let score = calculate_silhouette_score_sampled(&embeddings, &centroids).unwrap();
+
+        // Well-separated clusters should have positive silhouette
+        assert!(score > 0.0, "Expected positive silhouette, got {}", score);
     }
 }

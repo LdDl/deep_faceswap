@@ -1,0 +1,91 @@
+@import 'tailwindcss';
+
+@theme {
+	/* Surface colors — dark theme with depth levels */
+	--color-surface-0: #0f1117;
+	--color-surface-1: #1a1d27;
+	--color-surface-2: #242836;
+	--color-surface-3: #2e3345;
+
+	/* Border colors */
+	--color-border: #333849;
+	--color-border-focus: #5b8def;
+
+	/* Text colors */
+	--color-text-primary: #e2e5ed;
+	--color-text-secondary: #8b92a5;
+	--color-text-muted: #5c6378;
+
+	/* Accent and semantic colors */
+	--color-accent: #5b8def;
+	--color-accent-hover: #729af3;
+	--color-success: #4ade80;
+	--color-success-hover: #5eea96;
+	--color-danger: #f87171;
+	--color-warning: #fbbf24;
+}
+
+/* Base overrides */
+body {
+	background-color: var(--color-surface-0);
+	color: var(--color-text-primary);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+::-webkit-scrollbar-track {
+	background: var(--color-surface-1);
+}
+::-webkit-scrollbar-thumb {
+	background: var(--color-surface-3);
+	border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--color-border);
+}
+
+/* Section entrance animation */
+@keyframes fade-slide-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+.section-enter {
+	animation: fade-slide-in 0.2s ease-out;
+}
+
+/* Smooth expand/collapse via CSS grid */
+.grid-expand {
+	display: grid;
+	grid-template-rows: 0fr;
+	transition: grid-template-rows 0.2s ease-out;
+}
+.grid-expand.open {
+	grid-template-rows: 1fr;
+}
+.grid-expand > * {
+	overflow: hidden;
+}
+
+/* Indeterminate progress bar animation */
+@keyframes indeterminate {
+	0% {
+		transform: translateX(-100%);
+	}
+	50% {
+		transform: translateX(100%);
+	}
+	100% {
+		transform: translateX(300%);
+	}
+}

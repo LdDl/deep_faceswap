@@ -10,17 +10,18 @@
 //! 3. `build_cluster_info` - summarize clusters for interactive source-to-cluster mapping
 //! 4. `build_face_lookup` - build (frame_idx, cluster_id) -> faces lookup table
 
-use crate::clustering::{find_nearest_centroid, kmeans_cluster, select_optimal_k};
+use crate::clustering::{find_nearest_centroid_view, kmeans_cluster, select_optimal_k};
 use crate::detection::FaceDetector;
 use crate::recognition::FaceRecognizer;
 use crate::types::{DetectedFace, FaceSwapError, Result};
 use crate::utils::{image as img_io, rgb};
 use crate::{log_additional, log_main};
-use ndarray::{Array1, Array2};
+use ndarray::Array2;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Single face detected in a video frame, with its embedding and cluster assignment
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FaceRecord {
     /// Index of the frame where this face was detected
     pub frame_idx: usize,
@@ -59,6 +60,16 @@ pub fn scan_frames_for_faces(
     frame_paths: &[String],
     detector: &mut FaceDetector,
     recognizer: &mut FaceRecognizer,
+) -> Result<Vec<FaceRecord>> {
+    scan_frames_for_faces_with_progress(frame_paths, detector, recognizer, None)
+}
+
+/// Scan all video frames and extract face embeddings, with optional progress callback
+pub fn scan_frames_for_faces_with_progress(
+    frame_paths: &[String],
+    detector: &mut FaceDetector,
+    recognizer: &mut FaceRecognizer,
+    progress_cb: Option<&dyn Fn(usize, usize)>,
 ) -> Result<Vec<FaceRecord>> {
     log_main!(
         "video_analysis",
@@ -102,6 +113,9 @@ pub fn scan_frames_for_faces(
                 total = frame_paths.len(),
                 faces_found = face_records.len()
             );
+            if let Some(cb) = &progress_cb {
+                cb(frame_idx + 1, frame_paths.len());
+            }
         }
     }
 
@@ -141,16 +155,16 @@ pub fn cluster_faces(face_records: &mut Vec<FaceRecord>, max_k: usize) -> Result
         ));
     }
 
-    // Convert embeddings to ndarray
+    // Convert embeddings to ndarray — single flat copy, no per-element indexing
     let n_faces = face_records.len();
     let emb_dim = face_records[0].embedding.len();
-    let mut embeddings = Array2::<f32>::zeros((n_faces, emb_dim));
-
-    for (i, record) in face_records.iter().enumerate() {
-        for (j, &val) in record.embedding.iter().enumerate() {
-            embeddings[[i, j]] = val;
-        }
+    let mut flat = Vec::with_capacity(n_faces * emb_dim);
+    for record in face_records.iter() {
+        flat.extend_from_slice(&record.embedding);
     }
+    let embeddings = Array2::from_shape_vec((n_faces, emb_dim), flat).map_err(|e| {
+        FaceSwapError::ProcessingError(format!("Failed to build embedding matrix: {}", e))
+    })?;
 
     // Select optimal k
     let optimal_k = if n_faces <= 2 {
@@ -172,10 +186,9 @@ pub fn cluster_faces(face_records: &mut Vec<FaceRecord>, max_k: usize) -> Result
         kmeans_cluster(&embeddings, optimal_k, 100)?
     };
 
-    // Assign cluster IDs to face records
-    for record in face_records.iter_mut() {
-        let emb_array = Array1::from_vec(record.embedding.clone());
-        let (cluster_id, _) = find_nearest_centroid(&centroids, &emb_array)?;
+    // Assign cluster IDs using the already-built embeddings matrix (no cloning)
+    for (i, record) in face_records.iter_mut().enumerate() {
+        let (cluster_id, _) = find_nearest_centroid_view(&centroids, &embeddings.row(i))?;
         record.cluster_id = Some(cluster_id);
     }
 
@@ -273,4 +286,22 @@ pub fn build_face_lookup(
     }
 
     lookup
+}
+
+/// Save face records to a JSON file
+pub fn save_face_records(face_records: &[FaceRecord], path: &str) -> Result<()> {
+    let json = serde_json::to_vec(face_records).map_err(|e| {
+        FaceSwapError::ProcessingError(format!("Failed to serialize face records: {}", e))
+    })?;
+    std::fs::write(path, json)?;
+    Ok(())
+}
+
+/// Load face records from a JSON file
+pub fn load_face_records(path: &str) -> Result<Vec<FaceRecord>> {
+    let data = std::fs::read(path)?;
+    let records: Vec<FaceRecord> = serde_json::from_slice(&data).map_err(|e| {
+        FaceSwapError::ProcessingError(format!("Failed to deserialize face records: {}", e))
+    })?;
+    Ok(records)
 }

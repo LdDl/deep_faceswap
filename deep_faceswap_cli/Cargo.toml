@@ -9,6 +9,9 @@ license.workspace = true
 name = "deep-faceswap-cli"
 path = "src/main.rs"
 
+[features]
+cuda = ["deep_faceswap_core/cuda"]
+
 [dependencies]
 # Our core library
 deep_faceswap_core = { path = "../deep_faceswap_core" }
