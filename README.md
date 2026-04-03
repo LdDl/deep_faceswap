@@ -6,6 +6,7 @@ Rust implementation of face swapping. Basically a port of [Deep-Live-Cam](https:
 - [Work in progress](#work-in-progress)
 - [Quick start](#quick-start)
 - [CLI usage](#cli-usage)
+- [Showcase](#showcase)
 - [Web UI and REST API](#web-ui-and-rest-api)
 - [CUDA support](#cuda-support)
 - [Project structure](#project-structure)
@@ -287,9 +288,9 @@ https://github.com/user-attachments/assets/4fa7a32a-6d4f-409a-b60c-82817262b286
 :---:
 https://github.com/user-attachments/assets/82d1d32b-e6bb-4456-ae7b-d88389870831
 
-| Video swap |
+| Video swap (many to many) |
 :---:
-https://github.com/user-attachments/assets/b2293179-8e9b-4e58-aac8-7a8b78bebf2c
+https://github.com/user-attachments/assets/f9492d17-eee8-47f5-84db-78ccdc57fbe9
 
 > Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
 
