@@ -17,8 +17,11 @@ use crate::video::{
 };
 use crate::{log_additional, log_main};
 use ndarray::Array3;
+use image::RgbImage;
 use std::collections::HashMap;
 use std::fs::create_dir_all;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Instant;
 
 /// Swap a single source face into a single target face
@@ -817,15 +820,48 @@ pub fn swap_video_frames_with_mappings(
 
     log_main!(
         "video_processing",
-        "Processing frames started",
+        "Processing frames started (pipelined I/O)",
         total_frames = total_frames,
         mappings = cluster_mappings.len()
     );
 
-    for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
-        let frame_img = img_io::load_image(frame_path)?;
-        let frame_rgb = img_io::to_rgb8(&frame_img);
-        let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+    // --- Pipeline: reader thread, then main thread (inference), then writer thread ---
+
+    // Reader: decode frames from disk in background
+    let (read_tx, read_rx) = mpsc::sync_channel::<(usize, Array3<u8>)>(2);
+    let reader_paths: Vec<String> = frame_paths.to_vec();
+    let reader_handle = thread::spawn(move || -> std::result::Result<(), String> {
+        for (idx, path) in reader_paths.iter().enumerate() {
+            let img = image::open(path).map_err(|e| format!("Failed to read frame {}: {}", path, e))?;
+            let rgb = img.to_rgb8();
+            let array = rgb::rgb_to_array3(&rgb);
+            if read_tx.send((idx, array)).is_err() {
+                // main thread stopped, exit gracefully
+                break;
+            }
+        }
+        Ok(())
+    });
+
+    // Writer: encode and save processed frames to disk in background
+    let (write_tx, write_rx) = mpsc::sync_channel::<(String, RgbImage)>(2);
+    let writer_handle = thread::spawn(move || -> std::result::Result<(), String> {
+        while let Ok((path, image)) = write_rx.recv() {
+            image.save(&path).map_err(|e| format!("Failed to save frame {}: {}", path, e))?;
+        }
+        Ok(())
+    });
+
+    // Main thread: inference (sequential, models are &mut)
+    let mut pipeline_error: Option<FaceSwapError> = None;
+    for _ in 0..total_frames {
+        let (frame_idx, mut frame_array) = match read_rx.recv() {
+            Ok(v) => v,
+            Err(_) => {
+                // Reader died — check its error below
+                break;
+            }
+        };
 
         for mapping in cluster_mappings {
             let key = (frame_idx, mapping.cluster_id);
@@ -835,7 +871,7 @@ pub fn swap_video_frames_with_mappings(
                     let source_img = &source_images[source_info.source_image_index];
                     let source_embedding = &source_embeddings[mapping.source_idx];
 
-                    let _ = swap_single_pair(
+                    if let Err(e) = swap_single_pair(
                         &mut frame_array,
                         target_face,
                         source_img,
@@ -844,14 +880,26 @@ pub fn swap_video_frames_with_mappings(
                         enhancer,
                         landmark_detector,
                         use_mouth_mask,
-                    )?;
+                    ) {
+                        pipeline_error = Some(e);
+                        break;
+                    }
                 }
             }
+            if pipeline_error.is_some() {
+                break;
+            }
+        }
+        if pipeline_error.is_some() {
+            break;
         }
 
         let processed_frame = rgb::array3_to_rgb(&frame_array);
         let output_frame_path = format!("{}/frame_{:06}.png", processed_frames_dir, frame_idx);
-        img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+        if write_tx.send((output_frame_path, processed_frame)).is_err() {
+            // Writer died - check its error below
+            break;
+        }
 
         if let Some(ref cb) = progress_callback {
             cb(frame_idx + 1, total_frames);
@@ -866,6 +914,26 @@ pub fn swap_video_frames_with_mappings(
                 elapsed_s = processing_start.elapsed().as_secs_f64()
             );
         }
+    }
+
+    // Signal writer to finish and collect errors
+    drop(write_tx);
+
+    let reader_result = reader_handle.join().map_err(|_| {
+        FaceSwapError::ProcessingError("Reader thread panicked".to_string())
+    })?;
+    let writer_result = writer_handle.join().map_err(|_| {
+        FaceSwapError::ProcessingError("Writer thread panicked".to_string())
+    })?;
+
+    if let Some(e) = pipeline_error {
+        return Err(e);
+    }
+    if let Err(e) = reader_result {
+        return Err(FaceSwapError::ProcessingError(e));
+    }
+    if let Err(e) = writer_result {
+        return Err(FaceSwapError::ProcessingError(e));
     }
 
     log_main!(
@@ -912,48 +980,86 @@ pub fn swap_video_frames_single(
     let log_interval = std::cmp::max(10, total_frames / 10);
     let processing_start = Instant::now();
 
-    let mut reference_embedding: Option<Vec<f32>> = None;
+    // --- Pipeline: reader thread, then main thread (inference), then writer thread ---
 
-    for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
-        let frame_img = img_io::load_image(frame_path)?;
-        let frame_rgb = img_io::to_rgb8(&frame_img);
-        let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
-
-        let target_faces = detector.detect(&frame_array, 0.5, 0.4)?;
-
-        if !target_faces.is_empty() {
-            // Initialize reference embedding from first frame with a face
-            if reference_embedding.is_none() {
-                let first_face = &target_faces[0];
-                let aligned = alignment::align_face(&frame_array, first_face, 112)?;
-                reference_embedding = Some(recognizer.extract_embedding(&aligned.aligned_image)?);
+    // Reader: decode frames from disk in background
+    let (read_tx, read_rx) = mpsc::sync_channel::<(usize, Array3<u8>)>(2);
+    let reader_paths: Vec<String> = frame_paths.to_vec();
+    let reader_handle = thread::spawn(move || -> std::result::Result<(), String> {
+        for (idx, path) in reader_paths.iter().enumerate() {
+            let img = image::open(path).map_err(|e| format!("Failed to read frame {}: {}", path, e))?;
+            let rgb = img.to_rgb8();
+            let array = rgb::rgb_to_array3(&rgb);
+            if read_tx.send((idx, array)).is_err() {
+                break;
             }
+        }
+        Ok(())
+    });
 
-            if let Some(ref ref_emb) = reference_embedding {
-                if let Some(target_face) = crate::utils::embedding::find_most_similar_face(
-                    &target_faces,
-                    ref_emb,
-                    &frame_array,
-                    recognizer,
-                    0.3,
-                )? {
-                    let _ = swap_single_pair(
-                        &mut frame_array,
-                        target_face,
-                        source_image,
-                        source_embedding,
-                        swapper,
-                        enhancer,
-                        landmark_detector,
-                        use_mouth_mask,
-                    )?;
+    // Writer: encode and save processed frames to disk in background
+    let (write_tx, write_rx) = mpsc::sync_channel::<(String, RgbImage)>(2);
+    let writer_handle = thread::spawn(move || -> std::result::Result<(), String> {
+        while let Ok((path, image)) = write_rx.recv() {
+            image.save(&path).map_err(|e| format!("Failed to save frame {}: {}", path, e))?;
+        }
+        Ok(())
+    });
+
+    // Main thread: inference (sequential, models are &mut)
+    let mut reference_embedding: Option<Vec<f32>> = None;
+    let mut pipeline_error: Option<FaceSwapError> = None;
+
+    for _ in 0..total_frames {
+        let (frame_idx, mut frame_array) = match read_rx.recv() {
+            Ok(v) => v,
+            Err(_) => break,
+        };
+
+        let inference_result = (|| -> Result<()> {
+            let target_faces = detector.detect(&frame_array, 0.5, 0.4)?;
+
+            if !target_faces.is_empty() {
+                if reference_embedding.is_none() {
+                    let first_face = &target_faces[0];
+                    let aligned = alignment::align_face(&frame_array, first_face, 112)?;
+                    reference_embedding = Some(recognizer.extract_embedding(&aligned.aligned_image)?);
+                }
+
+                if let Some(ref ref_emb) = reference_embedding {
+                    if let Some(target_face) = crate::utils::embedding::find_most_similar_face(
+                        &target_faces,
+                        ref_emb,
+                        &frame_array,
+                        recognizer,
+                        0.3,
+                    )? {
+                        let _ = swap_single_pair(
+                            &mut frame_array,
+                            target_face,
+                            source_image,
+                            source_embedding,
+                            swapper,
+                            enhancer,
+                            landmark_detector,
+                            use_mouth_mask,
+                        )?;
+                    }
                 }
             }
+            Ok(())
+        })();
+
+        if let Err(e) = inference_result {
+            pipeline_error = Some(e);
+            break;
         }
 
         let processed_frame = rgb::array3_to_rgb(&frame_array);
         let output_frame_path = format!("{}/frame_{:06}.png", processed_frames_dir, frame_idx);
-        img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
+        if write_tx.send((output_frame_path, processed_frame)).is_err() {
+            break;
+        }
 
         if let Some(ref cb) = progress_callback {
             cb(frame_idx + 1, total_frames);
@@ -968,6 +1074,26 @@ pub fn swap_video_frames_single(
                 elapsed_s = processing_start.elapsed().as_secs_f64()
             );
         }
+    }
+
+    // Signal writer to finish and collect errors
+    drop(write_tx);
+
+    let reader_result = reader_handle.join().map_err(|_| {
+        FaceSwapError::ProcessingError("Reader thread panicked".to_string())
+    })?;
+    let writer_result = writer_handle.join().map_err(|_| {
+        FaceSwapError::ProcessingError("Writer thread panicked".to_string())
+    })?;
+
+    if let Some(e) = pipeline_error {
+        return Err(e);
+    }
+    if let Err(e) = reader_result {
+        return Err(FaceSwapError::ProcessingError(e));
+    }
+    if let Err(e) = writer_result {
+        return Err(FaceSwapError::ProcessingError(e));
     }
 
     log_main!(
