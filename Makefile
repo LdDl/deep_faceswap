@@ -43,6 +43,7 @@ run: all
 		--swapper models/inswapper_128.onnx \
 		--enhancer models/GFPGANv1.4.onnx \
 		--landmark-model models/buffalo_l/2d106det.onnx \
+		--occluder-model models/xseg_3.onnx \
 		--port 36000
 
 clean:
