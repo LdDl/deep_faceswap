@@ -5,7 +5,8 @@ use crate::state::AppState;
 use actix_web::{web, HttpRequest, HttpResponse};
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
-use deep_faceswap_core::swap::swap_with_mappings;
+use deep_faceswap_core::occlusion::{ForegroundProtection, OcclusionOptions};
+use deep_faceswap_core::swap::swap_with_mappings_with_foreground;
 use deep_faceswap_core::types::{FaceMapping, SourceFaceInfo};
 use deep_faceswap_core::utils::{image as img_io, rgb};
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,12 @@ pub struct SwapImageRequest {
     #[serde(default)]
     #[schema(example = false)]
     pub mouth_mask: bool,
+    /// Preserve objects covering the face, including hands and food
+    #[serde(default)]
+    pub preserve_foreground: bool,
+    /// Foreground margin and edge softness in aligned face pixels
+    #[serde(default)]
+    pub foreground_options: OcclusionOptions,
 }
 
 /// Image swap result
@@ -70,12 +77,44 @@ pub async fn swap_image(
     let req = req.into_inner();
     let req_body = serde_json::to_string(&req).unwrap_or_default();
 
+    if let Err(error) = req.foreground_options.validate() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: error.to_string(),
+        });
+    }
+    if req.preserve_foreground && state.models.occluder.is_none() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: "Foreground preservation is not available on this server".to_string(),
+        });
+    }
+
     let result = tokio::task::spawn_blocking(move || {
         let mut detector = state.models.detector.lock().unwrap();
         let mut recognizer = state.models.recognizer.lock().unwrap();
         let mut swapper = state.models.swapper.lock().unwrap();
         let mut enhancer = state.models.enhancer.lock().unwrap();
         let mut landmark_detector = state.models.landmark_detector.lock().unwrap();
+        let mut occluder = if req.preserve_foreground {
+            Some(
+                state
+                    .models
+                    .occluder
+                    .as_ref()
+                    .ok_or_else(|| {
+                        "Foreground preservation is not available on this server".to_string()
+                    })?
+                    .lock()
+                    .map_err(|_| "Face occluder is unavailable".to_string())?,
+            )
+        } else {
+            None
+        };
+        let mut foreground = occluder
+            .as_deref_mut()
+            .map(|occluder| ForegroundProtection {
+                occluder,
+                options: req.foreground_options,
+            });
 
         // Conditionally disable enhancer/landmark per request
         let mut no_enhancer: Option<FaceEnhancer> = None;
@@ -157,7 +196,7 @@ pub async fn swap_image(
         let faces_swapped = req.mappings.len();
         let mut result_image = target_array.clone();
 
-        let elapsed_s = swap_with_mappings(
+        let elapsed_s = swap_with_mappings_with_foreground(
             &all_source_faces,
             &target_faces,
             &source_images,
@@ -168,6 +207,7 @@ pub async fn swap_image(
             enhancer_ref,
             landmark_ref,
             req.mouth_mask,
+            foreground.as_mut(),
         )
         .map_err(|e| format!("Swap failed: {}", e))?;
 
@@ -211,5 +251,24 @@ pub async fn swap_image(
                 error_text: err_msg,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn existing_image_requests_keep_foreground_preservation_disabled() {
+        let request: SwapImageRequest = serde_json::from_value(serde_json::json!({
+            "source_paths": ["source.jpg"],
+            "target_path": "target.jpg",
+            "output_path": "output.jpg",
+            "mappings": [{"source_idx": 0, "target_idx": 0}]
+        }))
+        .unwrap();
+        assert!(!request.preserve_foreground);
+        assert_eq!(request.foreground_options.margin, 2);
+        assert_eq!(request.foreground_options.blur, 3);
     }
 }

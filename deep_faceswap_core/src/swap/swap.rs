@@ -6,6 +6,7 @@ use crate::enhancer::FaceEnhancer;
 use crate::landmark::LandmarkDetector;
 use crate::mouth_mask;
 use crate::multi_face;
+use crate::occlusion::ForegroundProtection;
 use crate::recognition::FaceRecognizer;
 use crate::swapper::FaceSwapper;
 use crate::types::{ClusterMapping, DetectedFace, FaceSwapError, Result, SourceFaceInfo};
@@ -24,6 +25,11 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
+/// Bounded depth of the reader→inference and inference→writer pipeline channels.
+/// Lets frame decode run ahead and encode run behind inference to absorb I/O
+/// jitter without unbounded memory growth.
+const PIPELINE_DEPTH: usize = 6;
+
 /// Swap a single source face into a single target face
 ///
 /// # Arguments
@@ -41,14 +47,43 @@ use std::time::Instant;
 pub fn swap_single_pair(
     target_image: &mut Array3<u8>,
     target_face: &DetectedFace,
-    _source_image: &Array3<u8>,
+    source_image: &Array3<u8>,
     source_embedding: &[f32],
     swapper: &mut FaceSwapper,
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
     use_mouth_mask: bool,
 ) -> Result<f64> {
+    swap_single_pair_with_foreground(
+        target_image,
+        target_face,
+        source_image,
+        source_embedding,
+        swapper,
+        enhancer,
+        landmark_detector,
+        use_mouth_mask,
+        None,
+    )
+}
+
+/// Run `swap_single_pair` with optional foreground preservation.
+pub fn swap_single_pair_with_foreground(
+    target_image: &mut Array3<u8>,
+    target_face: &DetectedFace,
+    _source_image: &Array3<u8>,
+    source_embedding: &[f32],
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    use_mouth_mask: bool,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
+) -> Result<f64> {
     let start_time = Instant::now();
+    let protected_region = foreground
+        .as_mut()
+        .map(|protection| protection.capture(target_image, target_face))
+        .transpose()?;
 
     // Detect 106 landmarks on target face before swap (needed for mouth mask)
     let mouth_mask_data = if use_mouth_mask {
@@ -97,6 +132,10 @@ pub fn swap_single_pair(
         )?;
     }
 
+    if let Some(region) = protected_region {
+        region.restore(target_image);
+    }
+
     Ok(start_time.elapsed().as_secs_f64())
 }
 
@@ -130,6 +169,35 @@ pub fn swap_with_mappings(
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
     use_mouth_mask: bool,
+) -> Result<f64> {
+    swap_with_mappings_with_foreground(
+        source_face_infos,
+        target_faces,
+        source_images,
+        target_image,
+        mappings,
+        recognizer,
+        swapper,
+        enhancer,
+        landmark_detector,
+        use_mouth_mask,
+        None,
+    )
+}
+
+/// Run `swap_with_mappings` with optional foreground preservation.
+pub fn swap_with_mappings_with_foreground(
+    source_face_infos: &[SourceFaceInfo],
+    target_faces: &[DetectedFace],
+    source_images: &[Array3<u8>],
+    target_image: &mut Array3<u8>,
+    mappings: &[crate::types::FaceMapping],
+    recognizer: &mut FaceRecognizer,
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    use_mouth_mask: bool,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
 ) -> Result<f64> {
     log_main!(
         "multi_face",
@@ -167,7 +235,7 @@ pub fn swap_with_mappings(
         let source_embedding = &source_embeddings[mapping.source_idx];
         let target_face = &target_faces[mapping.target_idx];
 
-        let _ = swap_single_pair(
+        let _ = swap_single_pair_with_foreground(
             target_image,
             target_face,
             source_img,
@@ -176,6 +244,7 @@ pub fn swap_with_mappings(
             enhancer,
             landmark_detector,
             use_mouth_mask,
+            foreground.as_deref_mut(),
         )?;
     }
 
@@ -196,6 +265,7 @@ fn swap_multiple_faces(
     enhancer: &mut Option<FaceEnhancer>,
     landmark_detector: &mut Option<LandmarkDetector>,
     use_mouth_mask: bool,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
 ) -> Result<f64> {
     // Build face mappings via interactive prompts
     let mappings = multi_face::build_face_mappings(
@@ -205,7 +275,7 @@ fn swap_multiple_faces(
         target_image,
     )?;
 
-    swap_with_mappings(
+    swap_with_mappings_with_foreground(
         source_face_infos,
         target_faces,
         source_images,
@@ -216,6 +286,7 @@ fn swap_multiple_faces(
         enhancer,
         landmark_detector,
         use_mouth_mask,
+        foreground.as_deref_mut(),
     )
 }
 
@@ -248,6 +319,35 @@ pub fn swap_faces(
     landmark_model: Option<&str>,
     use_mouth_mask: bool,
     use_multi_face: bool,
+) -> Result<()> {
+    swap_faces_with_foreground(
+        source_path,
+        target_path,
+        output_path,
+        detector_model,
+        recognizer_model,
+        swapper_model,
+        enhancer_model,
+        landmark_model,
+        use_mouth_mask,
+        use_multi_face,
+        None,
+    )
+}
+
+/// Run `swap_faces` with optional foreground preservation.
+pub fn swap_faces_with_foreground(
+    source_path: &str,
+    target_path: &str,
+    output_path: &str,
+    detector_model: &str,
+    recognizer_model: &str,
+    swapper_model: &str,
+    enhancer_model: Option<&str>,
+    landmark_model: Option<&str>,
+    use_mouth_mask: bool,
+    use_multi_face: bool,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
 ) -> Result<()> {
     log_main!(
         "swap_init",
@@ -366,6 +466,7 @@ pub fn swap_faces(
             &mut enhancer,
             &mut landmark_detector,
             use_mouth_mask,
+            foreground.as_deref_mut(),
         )?;
         log_main!(
             "multi_face",
@@ -400,7 +501,7 @@ pub fn swap_faces(
         let source_aligned = alignment::align_face(source_image, source_face, 112)?;
         let source_embedding = recognizer.extract_embedding(&source_aligned.aligned_image)?;
 
-        let elapsed_s = swap_single_pair(
+        let elapsed_s = swap_single_pair_with_foreground(
             &mut result,
             target_face,
             source_image,
@@ -409,6 +510,7 @@ pub fn swap_faces(
             &mut enhancer,
             &mut landmark_detector,
             use_mouth_mask,
+            foreground.as_deref_mut(),
         )?;
         log_main!("face_swap", "Face swap complete", elapsed_s = elapsed_s);
     }
@@ -448,6 +550,37 @@ pub fn swap_video(
     use_mouth_mask: bool,
     use_multi_face: bool,
     video_tmp_dir: Option<&str>,
+) -> Result<()> {
+    swap_video_with_foreground(
+        source_path,
+        target_path,
+        output_path,
+        detector_path,
+        recognizer_path,
+        swapper_path,
+        enhancer_path,
+        landmark_path,
+        use_mouth_mask,
+        use_multi_face,
+        video_tmp_dir,
+        None,
+    )
+}
+
+/// Run `swap_video` with optional foreground preservation.
+pub fn swap_video_with_foreground(
+    source_path: &str,
+    target_path: &str,
+    output_path: &str,
+    detector_path: &str,
+    recognizer_path: &str,
+    swapper_path: &str,
+    enhancer_path: Option<&str>,
+    landmark_path: Option<&str>,
+    use_mouth_mask: bool,
+    use_multi_face: bool,
+    video_tmp_dir: Option<&str>,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
 ) -> Result<()> {
     log_main!("video_processing", "Starting video face swap");
 
@@ -647,7 +780,7 @@ pub fn swap_video(
         for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
             let frame_img = img_io::load_image(frame_path)?;
             let frame_rgb = img_io::to_rgb8(&frame_img);
-            let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+            let mut frame_array = rgb::rgb_to_array3_owned(frame_rgb);
 
             // apply each mapping
             for mapping in &cluster_mappings {
@@ -659,7 +792,7 @@ pub fn swap_video(
                         let source_img = &source_images[source_info.source_image_index];
                         let source_embedding = &source_embeddings[mapping.source_idx];
 
-                        let _ = swap_single_pair(
+                        let _ = swap_single_pair_with_foreground(
                             &mut frame_array,
                             target_face,
                             source_img,
@@ -668,12 +801,13 @@ pub fn swap_video(
                             &mut enhancer,
                             &mut landmark_detector,
                             use_mouth_mask,
+                            foreground.as_deref_mut(),
                         )?;
                     }
                 }
             }
 
-            let processed_frame = rgb::array3_to_rgb(&frame_array);
+            let processed_frame = rgb::array3_into_rgb(frame_array);
             let output_frame_path = format!("{}/frame_{:06}.png", processed_frames_dir, frame_idx);
             img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
 
@@ -704,7 +838,7 @@ pub fn swap_video(
         for (frame_idx, frame_path) in frame_paths.iter().enumerate() {
             let frame_img = img_io::load_image(frame_path)?;
             let frame_rgb = img_io::to_rgb8(&frame_img);
-            let mut frame_array = rgb::rgb_to_array3(&frame_rgb);
+            let mut frame_array = rgb::rgb_to_array3_owned(frame_rgb);
 
             let target_faces = detector.detect(&frame_array, 0.5, 0.4)?;
 
@@ -726,7 +860,7 @@ pub fn swap_video(
                         &mut recognizer,
                         0.3,
                     )? {
-                        let _ = swap_single_pair(
+                        let _ = swap_single_pair_with_foreground(
                             &mut frame_array,
                             target_face,
                             source_image,
@@ -735,12 +869,13 @@ pub fn swap_video(
                             &mut enhancer,
                             &mut landmark_detector,
                             use_mouth_mask,
+                            foreground.as_deref_mut(),
                         )?;
                     }
                 }
             }
 
-            let processed_frame = rgb::array3_to_rgb(&frame_array);
+            let processed_frame = rgb::array3_into_rgb(frame_array);
             let output_frame_path = format!("{}/frame_{:06}.png", processed_frames_dir, frame_idx);
             img_io::save_image_quiet(&processed_frame, &output_frame_path)?;
 
@@ -814,6 +949,39 @@ pub fn swap_video_frames_with_mappings(
     use_mouth_mask: bool,
     progress_callback: Option<&dyn Fn(usize, usize)>,
 ) -> Result<()> {
+    swap_video_frames_with_mappings_with_foreground(
+        frame_paths,
+        processed_frames_dir,
+        cluster_mappings,
+        face_lookup,
+        all_source_faces,
+        source_images,
+        source_embeddings,
+        swapper,
+        enhancer,
+        landmark_detector,
+        use_mouth_mask,
+        progress_callback,
+        None,
+    )
+}
+
+/// Run `swap_video_frames_with_mappings` with optional foreground preservation.
+pub fn swap_video_frames_with_mappings_with_foreground(
+    frame_paths: &[String],
+    processed_frames_dir: &str,
+    cluster_mappings: &[ClusterMapping],
+    face_lookup: &HashMap<(usize, usize), Vec<DetectedFace>>,
+    all_source_faces: &[SourceFaceInfo],
+    source_images: &[Array3<u8>],
+    source_embeddings: &[Vec<f32>],
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    use_mouth_mask: bool,
+    progress_callback: Option<&dyn Fn(usize, usize)>,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
+) -> Result<()> {
     let total_frames = frame_paths.len();
     let log_interval = std::cmp::max(10, total_frames / 10);
     let processing_start = Instant::now();
@@ -828,13 +996,13 @@ pub fn swap_video_frames_with_mappings(
     // --- Pipeline: reader thread, then main thread (inference), then writer thread ---
 
     // Reader: decode frames from disk in background
-    let (read_tx, read_rx) = mpsc::sync_channel::<(usize, Array3<u8>)>(2);
+    let (read_tx, read_rx) = mpsc::sync_channel::<(usize, Array3<u8>)>(PIPELINE_DEPTH);
     let reader_paths: Vec<String> = frame_paths.to_vec();
     let reader_handle = thread::spawn(move || -> std::result::Result<(), String> {
         for (idx, path) in reader_paths.iter().enumerate() {
             let img = image::open(path).map_err(|e| format!("Failed to read frame {}: {}", path, e))?;
             let rgb = img.to_rgb8();
-            let array = rgb::rgb_to_array3(&rgb);
+            let array = rgb::rgb_to_array3_owned(rgb);
             if read_tx.send((idx, array)).is_err() {
                 // main thread stopped, exit gracefully
                 break;
@@ -844,7 +1012,7 @@ pub fn swap_video_frames_with_mappings(
     });
 
     // Writer: encode and save processed frames to disk in background
-    let (write_tx, write_rx) = mpsc::sync_channel::<(String, RgbImage)>(2);
+    let (write_tx, write_rx) = mpsc::sync_channel::<(String, RgbImage)>(PIPELINE_DEPTH);
     let writer_handle = thread::spawn(move || -> std::result::Result<(), String> {
         while let Ok((path, image)) = write_rx.recv() {
             image.save(&path).map_err(|e| format!("Failed to save frame {}: {}", path, e))?;
@@ -871,7 +1039,7 @@ pub fn swap_video_frames_with_mappings(
                     let source_img = &source_images[source_info.source_image_index];
                     let source_embedding = &source_embeddings[mapping.source_idx];
 
-                    if let Err(e) = swap_single_pair(
+                    if let Err(e) = swap_single_pair_with_foreground(
                         &mut frame_array,
                         target_face,
                         source_img,
@@ -880,6 +1048,7 @@ pub fn swap_video_frames_with_mappings(
                         enhancer,
                         landmark_detector,
                         use_mouth_mask,
+                        foreground.as_deref_mut(),
                     ) {
                         pipeline_error = Some(e);
                         break;
@@ -894,7 +1063,7 @@ pub fn swap_video_frames_with_mappings(
             break;
         }
 
-        let processed_frame = rgb::array3_to_rgb(&frame_array);
+        let processed_frame = rgb::array3_into_rgb(frame_array);
         let output_frame_path = format!("{}/frame_{:06}.png", processed_frames_dir, frame_idx);
         if write_tx.send((output_frame_path, processed_frame)).is_err() {
             // Writer died - check its error below
@@ -916,6 +1085,8 @@ pub fn swap_video_frames_with_mappings(
         }
     }
 
+    // Release the reader if inference or writing stopped before all frames were consumed.
+    drop(read_rx);
     // Signal writer to finish and collect errors
     drop(write_tx);
 
@@ -976,6 +1147,37 @@ pub fn swap_video_frames_single(
     use_mouth_mask: bool,
     progress_callback: Option<&dyn Fn(usize, usize)>,
 ) -> Result<()> {
+    swap_video_frames_single_with_foreground(
+        frame_paths,
+        processed_frames_dir,
+        source_image,
+        source_embedding,
+        detector,
+        recognizer,
+        swapper,
+        enhancer,
+        landmark_detector,
+        use_mouth_mask,
+        progress_callback,
+        None,
+    )
+}
+
+/// Run `swap_video_frames_single` with optional foreground preservation.
+pub fn swap_video_frames_single_with_foreground(
+    frame_paths: &[String],
+    processed_frames_dir: &str,
+    source_image: &Array3<u8>,
+    source_embedding: &[f32],
+    detector: &mut FaceDetector,
+    recognizer: &mut FaceRecognizer,
+    swapper: &mut FaceSwapper,
+    enhancer: &mut Option<FaceEnhancer>,
+    landmark_detector: &mut Option<LandmarkDetector>,
+    use_mouth_mask: bool,
+    progress_callback: Option<&dyn Fn(usize, usize)>,
+    mut foreground: Option<&mut ForegroundProtection<'_>>,
+) -> Result<()> {
     let total_frames = frame_paths.len();
     let log_interval = std::cmp::max(10, total_frames / 10);
     let processing_start = Instant::now();
@@ -983,13 +1185,13 @@ pub fn swap_video_frames_single(
     // --- Pipeline: reader thread, then main thread (inference), then writer thread ---
 
     // Reader: decode frames from disk in background
-    let (read_tx, read_rx) = mpsc::sync_channel::<(usize, Array3<u8>)>(2);
+    let (read_tx, read_rx) = mpsc::sync_channel::<(usize, Array3<u8>)>(PIPELINE_DEPTH);
     let reader_paths: Vec<String> = frame_paths.to_vec();
     let reader_handle = thread::spawn(move || -> std::result::Result<(), String> {
         for (idx, path) in reader_paths.iter().enumerate() {
             let img = image::open(path).map_err(|e| format!("Failed to read frame {}: {}", path, e))?;
             let rgb = img.to_rgb8();
-            let array = rgb::rgb_to_array3(&rgb);
+            let array = rgb::rgb_to_array3_owned(rgb);
             if read_tx.send((idx, array)).is_err() {
                 break;
             }
@@ -998,7 +1200,7 @@ pub fn swap_video_frames_single(
     });
 
     // Writer: encode and save processed frames to disk in background
-    let (write_tx, write_rx) = mpsc::sync_channel::<(String, RgbImage)>(2);
+    let (write_tx, write_rx) = mpsc::sync_channel::<(String, RgbImage)>(PIPELINE_DEPTH);
     let writer_handle = thread::spawn(move || -> std::result::Result<(), String> {
         while let Ok((path, image)) = write_rx.recv() {
             image.save(&path).map_err(|e| format!("Failed to save frame {}: {}", path, e))?;
@@ -1034,7 +1236,7 @@ pub fn swap_video_frames_single(
                         recognizer,
                         0.3,
                     )? {
-                        let _ = swap_single_pair(
+                        let _ = swap_single_pair_with_foreground(
                             &mut frame_array,
                             target_face,
                             source_image,
@@ -1043,6 +1245,7 @@ pub fn swap_video_frames_single(
                             enhancer,
                             landmark_detector,
                             use_mouth_mask,
+                            foreground.as_deref_mut(),
                         )?;
                     }
                 }
@@ -1055,7 +1258,7 @@ pub fn swap_video_frames_single(
             break;
         }
 
-        let processed_frame = rgb::array3_to_rgb(&frame_array);
+        let processed_frame = rgb::array3_into_rgb(frame_array);
         let output_frame_path = format!("{}/frame_{:06}.png", processed_frames_dir, frame_idx);
         if write_tx.send((output_frame_path, processed_frame)).is_err() {
             break;
@@ -1076,6 +1279,8 @@ pub fn swap_video_frames_single(
         }
     }
 
+    // Release the reader if inference or writing stopped before all frames were consumed.
+    drop(read_rx);
     // Signal writer to finish and collect errors
     drop(write_tx);
 

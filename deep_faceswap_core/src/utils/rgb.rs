@@ -159,3 +159,42 @@ pub fn array3_to_rgb(array: &Array3<u8>) -> RgbImage {
 
     RgbImage::from_raw(w as u32, h as u32, data).expect("Array3 data size must match W*H*3")
 }
+
+/// Convert RgbImage to Array3<u8> (HWC) by MOVING the backing buffer (no copy)
+///
+/// Identical result to [`rgb_to_array3`], but consumes the image and reuses its
+/// raw pixel buffer instead of cloning it. Use when the `RgbImage` is discarded
+/// right after conversion (e.g. the video reader thread).
+pub fn rgb_to_array3_owned(img: RgbImage) -> Array3<u8> {
+    let (width, height) = img.dimensions();
+
+    // RgbImage stores pixels as [R,G,B,...] row-major; an Array3 of shape (H,W,3)
+    // in standard layout has identical memory, so the Vec can be reused as-is.
+    Array3::from_shape_vec((height as usize, width as usize, 3), img.into_raw())
+        .expect("RgbImage raw buffer size must match H*W*3")
+}
+
+/// Convert Array3<u8> (HWC) to RgbImage by MOVING the backing buffer when possible
+///
+/// Identical result to [`array3_to_rgb`], but consumes the array. For the common
+/// case of an owned, standard-layout frame this reuses the buffer with zero copy;
+/// non-contiguous arrays (e.g. views) fall back to a copy.
+pub fn array3_into_rgb(array: Array3<u8>) -> RgbImage {
+    let (h, w, _) = (array.shape()[0], array.shape()[1], array.shape()[2]);
+    let (width, height) = (w as u32, h as u32);
+
+    if !array.is_standard_layout() {
+        return array3_to_rgb(&array);
+    }
+
+    let needed = h * w * 3;
+    let (data, offset) = array.into_raw_vec_and_offset();
+    let start = offset.unwrap_or(0);
+    if start == 0 && data.len() == needed {
+        RgbImage::from_raw(width, height, data).expect("Array3 data size must match W*H*3")
+    } else {
+        // Standard layout but offset into a larger backing buffer (rare): copy the window.
+        RgbImage::from_raw(width, height, data[start..start + needed].to_vec())
+            .expect("Array3 data size must match W*H*3")
+    }
+}

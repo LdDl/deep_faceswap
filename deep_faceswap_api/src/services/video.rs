@@ -11,7 +11,8 @@ use deep_faceswap_core::alignment;
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
 use deep_faceswap_core::multi_face::{save_cluster_crops_to, save_face_crops_from_infos_to};
-use deep_faceswap_core::swap::swap_video_frames_with_mappings;
+use deep_faceswap_core::occlusion::{ForegroundProtection, OcclusionOptions};
+use deep_faceswap_core::swap::swap_video_frames_with_mappings_with_foreground;
 use deep_faceswap_core::types::{ClusterMapping, SourceFaceInfo};
 use deep_faceswap_core::utils::media::validate_output_path;
 use deep_faceswap_core::utils::{image as img_io, rgb};
@@ -90,6 +91,12 @@ pub struct VideoSwapRequest {
     #[serde(default)]
     #[schema(example = false)]
     pub mouth_mask: bool,
+    /// Preserve objects covering the face, including hands and food
+    #[serde(default)]
+    pub preserve_foreground: bool,
+    /// Foreground margin and edge softness in aligned face pixels
+    #[serde(default)]
+    pub foreground_options: OcclusionOptions,
     /// Custom directory for temporary files. Falls back to server default.
     #[serde(default)]
     pub tmp_dir: Option<String>,
@@ -389,6 +396,7 @@ pub async fn analyze_video(
     request_body = VideoSwapRequest,
     responses(
         (status = 202, description = "Job created", body = VideoSwapResponse),
+        (status = 400, description = "Invalid foreground settings or unavailable model", body = ErrorResponse),
         (status = 500, description = "Internal error", body = ErrorResponse)
     )
 )]
@@ -402,6 +410,17 @@ pub async fn swap_video(
     let state = state.into_inner();
     let req = req.into_inner();
     let req_body = serde_json::to_string(&req).unwrap_or_default();
+
+    if let Err(error) = req.foreground_options.validate() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: error.to_string(),
+        });
+    }
+    if req.preserve_foreground && state.models.occluder.is_none() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error_text: "Foreground preservation is not available on this server".to_string(),
+        });
+    }
 
     if let Err(e) = validate_output_path(&req.output_path, &req.target_video_path) {
         return HttpResponse::BadRequest().json(ErrorResponse {
@@ -439,6 +458,27 @@ pub async fn swap_video(
             let mut swapper = state_clone.models.swapper.lock().unwrap();
             let mut enhancer = state_clone.models.enhancer.lock().unwrap();
             let mut landmark_detector = state_clone.models.landmark_detector.lock().unwrap();
+            let mut occluder = if req.preserve_foreground {
+                Some(
+                    state_clone
+                        .models
+                        .occluder
+                        .as_ref()
+                        .ok_or_else(|| {
+                            "Foreground preservation is not available on this server".to_string()
+                        })?
+                        .lock()
+                        .map_err(|_| "Face occluder is unavailable".to_string())?,
+                )
+            } else {
+                None
+            };
+            let mut foreground = occluder
+                .as_deref_mut()
+                .map(|occluder| ForegroundProtection {
+                    occluder,
+                    options: req.foreground_options,
+                });
 
             // Conditionally disable enhancer/landmark per request
             let mut no_enhancer: Option<FaceEnhancer> = None;
@@ -547,7 +587,7 @@ pub async fn swap_video(
                 }
             };
 
-            swap_video_frames_with_mappings(
+            swap_video_frames_with_mappings_with_foreground(
                 &frame_paths,
                 &processed_dir,
                 &req.cluster_mappings,
@@ -560,6 +600,7 @@ pub async fn swap_video(
                 landmark_ref,
                 req.mouth_mask,
                 Some(&progress_cb),
+                foreground.as_mut(),
             )
             .map_err(|e| format!("Frame processing failed: {}", e))?;
 
@@ -614,4 +655,27 @@ pub async fn swap_video(
         job_id,
         status: "queued".to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_requests_accept_partial_foreground_settings() {
+        let request: VideoSwapRequest = serde_json::from_value(serde_json::json!({
+            "session_id": "session",
+            "source_paths": ["source.jpg"],
+            "target_video_path": "target.mp4",
+            "output_path": "output.mp4",
+            "cluster_mappings": [{"source_idx": 0, "cluster_id": 0}],
+            "preserve_foreground": true,
+            "foreground_options": {"margin": 5}
+        }))
+        .unwrap();
+        assert!(request.preserve_foreground);
+        assert_eq!(request.foreground_options.margin, 5);
+        assert_eq!(request.foreground_options.blur, 3);
+        assert!(request.foreground_options.validate().is_ok());
+    }
 }

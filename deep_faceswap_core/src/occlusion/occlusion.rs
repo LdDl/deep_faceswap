@@ -126,11 +126,8 @@ pub struct ForegroundProtection<'a> {
 }
 
 impl ForegroundProtection<'_> {
-    pub(crate) fn capture(
-        &mut self,
-        image: &Array3<u8>,
-        face: &DetectedFace,
-    ) -> Result<ProtectedRegion> {
+    /// Save original foreground pixels for restoration after processing the detected face.
+    pub fn capture(&mut self, image: &Array3<u8>, face: &DetectedFace) -> Result<ProtectedRegion> {
         self.options.validate()?;
         let aligned = align_face(image, face, MASK_SIZE as u32)?;
         let visible = self.occluder.visible_mask(&aligned.aligned_image)?;
@@ -156,7 +153,7 @@ fn adjust_mask(visible: &Array2<f32>, options: OcclusionOptions) -> Array2<f32> 
 }
 
 /// Original pixels and a frame-space visible-face mask covering the paste-back ROI.
-pub(crate) struct ProtectedRegion {
+pub struct ProtectedRegion {
     original: Array3<u8>,
     visible: Array2<f32>,
     x: usize,
@@ -191,7 +188,7 @@ impl ProtectedRegion {
     }
 
     /// Restore foreground from the original ROI after swapping, mouth blending and enhancement.
-    pub(crate) fn restore(&self, image: &mut Array3<u8>) {
+    pub fn restore(&self, image: &mut Array3<u8>) {
         for ((y, x), &alpha) in self.visible.indexed_iter() {
             if alpha >= 1.0 {
                 continue;
