@@ -32,6 +32,8 @@ https://github.com/user-attachments/assets/f9492d17-eee8-47f5-84db-78ccdc57fbe9
 
 > Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
 
+> Showcase could be obsolete a bit (e.g. it does not show preservation of objects covering face), but it gives a good idea of what the project is capable of.
+
 ## Work in progress
 
 Current:
