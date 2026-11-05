@@ -1,3 +1,4 @@
+import { ForegroundOptions } from '../foreground_options.js'
 import { request } from '../api.js'
 import { FaceMapping } from '../face_mapping.js'
 
@@ -24,16 +25,20 @@ export class SwapImageResponse {
  * @param {FaceMapping[]} mappings
  * @param {boolean} enhance
  * @param {boolean} mouthMask
+ * @param {boolean} [preserveForeground]
+ * @param {ForegroundOptions} [foregroundOptions]
  * @returns {Promise<SwapImageResponse>}
  */
-export const swapImage = async (sourcePaths, targetPath, outputPath, mappings, enhance, mouthMask) => {
+export const swapImage = async (sourcePaths, targetPath, outputPath, mappings, enhance, mouthMask, preserveForeground = false, foregroundOptions = new ForegroundOptions()) => {
 	const data = await request('POST', '/swap/image', {
 		source_paths: sourcePaths,
 		target_path: targetPath,
 		output_path: outputPath,
 		mappings: mappings,
 		enhance: enhance,
-		mouth_mask: mouthMask
+		mouth_mask: mouthMask,
+		preserve_foreground: preserveForeground,
+		foreground_options: foregroundOptions
 	})
 	return new SwapImageResponse(data.output_path, data.elapsed_s, data.faces_swapped)
 }

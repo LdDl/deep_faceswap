@@ -98,6 +98,7 @@ pub fn init_routes(cfg: &mut web::ServiceConfig) {
             crate::services::video::VideoSwapRequest,
             crate::services::video::VideoSwapResponse,
             crate::services::video::ClusterInfo,
+            deep_faceswap_core::occlusion::OcclusionOptions,
             deep_faceswap_core::types::BBox,
             deep_faceswap_core::types::FaceMapping,
             deep_faceswap_core::types::ClusterMapping,

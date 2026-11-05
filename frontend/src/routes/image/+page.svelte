@@ -1,4 +1,5 @@
 <script>
+	import { ForegroundOptions } from '$lib/foreground_options.js';
 	import { tick } from 'svelte';
 	import SourcePathList from '$lib/components/SourcePathList.svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
@@ -18,6 +19,9 @@
 	let outputPath = $state('');
 	let enhance = $state(true);
 	let mouthMask = $state(false);
+	let preserveForeground = $state(false);
+	let foregroundMargin = $state(2);
+	let foregroundBlur = $state(3);
 
 	/** @type {DetectionResponse|null} */
 	let detection = $state(null);
@@ -98,7 +102,9 @@
 				outputPath,
 				mappings,
 				enhance,
-				mouthMask
+				mouthMask,
+				preserveForeground,
+				new ForegroundOptions(foregroundMargin, foregroundBlur)
 			);
 
 			await tick();
@@ -167,8 +173,14 @@
 			<OptionsBar
 				{enhance}
 				{mouthMask}
+				{preserveForeground}
+				{foregroundMargin}
+				{foregroundBlur}
 				onEnhanceChange={(/** @type {boolean} */ v) => (enhance = v)}
 				onMouthMaskChange={(/** @type {boolean} */ v) => (mouthMask = v)}
+				onPreserveForegroundChange={(value) => (preserveForeground = value)}
+				onForegroundMarginChange={(value) => (foregroundMargin = value)}
+				onForegroundBlurChange={(value) => (foregroundBlur = value)}
 			/>
 		</div>
 

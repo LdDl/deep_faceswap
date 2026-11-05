@@ -1,4 +1,5 @@
 use clap::Parser;
+use deep_faceswap_core::occlusion::{FaceOccluder, ForegroundProtection, OcclusionOptions};
 use deep_faceswap_core::utils::media::{is_video_file, validate_output_path};
 use deep_faceswap_core::verbose::{set_verbose_level, VerboseLevel};
 use deep_faceswap_core::Result;
@@ -60,6 +61,22 @@ enum Commands {
         #[arg(long, default_value = "models/buffalo_l/2d106det.onnx")]
         landmark_model: String,
 
+        /// Preserve objects covering the face, including hands and food
+        #[arg(long)]
+        preserve_foreground: bool,
+
+        /// Path to XSeg ONNX model used by foreground preservation
+        #[arg(long, default_value = "models/xseg_3.onnx")]
+        occluder_model: String,
+
+        /// Expand protected objects in aligned face pixels (0 to 16)
+        #[arg(long, default_value = "2", value_parser = clap::value_parser!(u8).range(0..=16))]
+        foreground_margin: u8,
+
+        /// Soften protected edges in aligned face pixels (0 to 16)
+        #[arg(long, default_value = "3", value_parser = clap::value_parser!(u8).range(0..=16))]
+        foreground_blur: u8,
+
         /// Process multiple faces with interactive mapping
         #[arg(long)]
         multi_face: bool,
@@ -98,6 +115,10 @@ fn main() -> Result<()> {
             enhancer,
             mouth_mask,
             landmark_model,
+            preserve_foreground,
+            occluder_model,
+            foreground_margin,
+            foreground_blur,
             multi_face,
             video_tmp_dir,
         } => {
@@ -114,8 +135,21 @@ fn main() -> Result<()> {
                 None
             };
 
+            let mut occluder = if preserve_foreground {
+                Some(FaceOccluder::new(&occluder_model)?)
+            } else {
+                None
+            };
+            let mut foreground = occluder.as_mut().map(|occluder| ForegroundProtection {
+                occluder,
+                options: OcclusionOptions {
+                    margin: foreground_margin as usize,
+                    blur: foreground_blur as usize,
+                },
+            });
+
             if is_video_file(&target) {
-                deep_faceswap_core::swap_video(
+                deep_faceswap_core::swap_video_with_foreground(
                     &source,
                     &target,
                     &output,
@@ -127,9 +161,10 @@ fn main() -> Result<()> {
                     mouth_mask,
                     multi_face,
                     video_tmp_dir.as_deref(),
+                    foreground.as_mut(),
                 )?;
             } else {
-                deep_faceswap_core::swap_faces(
+                deep_faceswap_core::swap_faces_with_foreground(
                     &source,
                     &target,
                     &output,
@@ -140,6 +175,7 @@ fn main() -> Result<()> {
                     landmark_model,
                     mouth_mask,
                     multi_face,
+                    foreground.as_mut(),
                 )?;
             }
         }

@@ -1,4 +1,5 @@
 <script>
+	import { ForegroundOptions } from '$lib/foreground_options.js';
 	import { tick, onMount, onDestroy } from 'svelte';
 	import SourcePathList from '$lib/components/SourcePathList.svelte';
 	import PathInput from '$lib/components/PathInput.svelte';
@@ -27,6 +28,9 @@
 			if (f.tmpDir) tmpDir = f.tmpDir;
 			if (f.enhance !== undefined) enhance = f.enhance;
 			if (f.mouthMask !== undefined) mouthMask = f.mouthMask;
+			if (typeof f.preserveForeground === 'boolean') preserveForeground = f.preserveForeground;
+			if (Number.isInteger(f.foregroundMargin) && f.foregroundMargin >= 0 && f.foregroundMargin <= 16) foregroundMargin = f.foregroundMargin;
+			if (Number.isInteger(f.foregroundBlur) && f.foregroundBlur >= 0 && f.foregroundBlur <= 16) foregroundBlur = f.foregroundBlur;
 		} catch {
 			// ignore
 		}
@@ -34,7 +38,8 @@
 
 	function saveForm() {
 		localStorage.setItem(FORM_KEY, JSON.stringify({
-			sourcePaths, targetVideoPath, outputPath, tmpDir, enhance, mouthMask
+			sourcePaths, targetVideoPath, outputPath, tmpDir, enhance, mouthMask,
+			preserveForeground, foregroundMargin, foregroundBlur
 		}));
 	}
 
@@ -44,6 +49,9 @@
 	let tmpDir = $state('');
 	let enhance = $state(true);
 	let mouthMask = $state(false);
+	let preserveForeground = $state(false);
+	let foregroundMargin = $state(2);
+	let foregroundBlur = $state(3);
 	let advancedOpen = $state(false);
 	let formLoaded = $state(false);
 
@@ -65,7 +73,7 @@
 	$effect(() => {
 		if (!formLoaded) return;
 		// Access all reactive values to track them
-		sourcePaths; targetVideoPath; outputPath; tmpDir; enhance; mouthMask;
+		sourcePaths; targetVideoPath; outputPath; tmpDir; enhance; mouthMask; preserveForeground; foregroundMargin; foregroundBlur;
 		if (saveTimer) clearTimeout(saveTimer);
 		saveTimer = setTimeout(saveForm, 500);
 	});
@@ -270,6 +278,9 @@
 			tmpDir = '';
 			enhance = true;
 			mouthMask = false;
+			preserveForeground = false;
+			foregroundMargin = 2;
+			foregroundBlur = 3;
 		}
 	}
 
@@ -340,7 +351,9 @@
 				clusterMappings,
 				enhance,
 				mouthMask,
-				tmpDir || undefined
+				tmpDir || undefined,
+				preserveForeground,
+				new ForegroundOptions(foregroundMargin, foregroundBlur)
 			);
 
 			swapJob = new JobState(res.job_id, 'queued', { stage: 'queued', current: 0, total: 0 });
@@ -411,8 +424,14 @@
 			<OptionsBar
 				{enhance}
 				{mouthMask}
+				{preserveForeground}
+				{foregroundMargin}
+				{foregroundBlur}
 				onEnhanceChange={(/** @type {boolean} */ v) => (enhance = v)}
 				onMouthMaskChange={(/** @type {boolean} */ v) => (mouthMask = v)}
+				onPreserveForegroundChange={(value) => (preserveForeground = value)}
+				onForegroundMarginChange={(value) => (foregroundMargin = value)}
+				onForegroundBlurChange={(value) => (foregroundBlur = value)}
 			/>
 
 			<!-- Advanced toggle for temp directory -->

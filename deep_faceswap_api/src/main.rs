@@ -12,6 +12,7 @@ use deep_faceswap_core::detection::FaceDetector;
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
 use deep_faceswap_core::log_main;
+use deep_faceswap_core::occlusion::FaceOccluder;
 use deep_faceswap_core::recognition::FaceRecognizer;
 use deep_faceswap_core::swapper::FaceSwapper;
 use deep_faceswap_core::verbose::{set_verbose_level, VerboseLevel};
@@ -52,6 +53,10 @@ struct Cli {
     /// Path to 106-point landmark model (enables mouth mask)
     #[arg(long)]
     landmark_model: Option<String>,
+
+    /// Path to XSeg ONNX model for preserving foreground objects
+    #[arg(long)]
+    occluder_model: Option<String>,
 
     /// Allowed directories for file browser (comma-separated, empty = allow all)
     #[arg(long, default_value = "")]
@@ -107,8 +112,15 @@ async fn main() -> std::io::Result<()> {
             .unwrap_or_else(|e| panic!("Failed to load landmark model '{}': {}", path, e))
     });
 
-    let model_count =
-        3 + enhancer.as_ref().map_or(0, |_| 1) + landmark_detector.as_ref().map_or(0, |_| 1);
+    let occluder = cli.occluder_model.as_ref().map(|path| {
+        FaceOccluder::new(path)
+            .unwrap_or_else(|e| panic!("Failed to load face occluder '{}': {}", path, e))
+    });
+
+    let model_count = 3
+        + enhancer.as_ref().map_or(0, |_| 1)
+        + landmark_detector.as_ref().map_or(0, |_| 1)
+        + occluder.as_ref().map_or(0, |_| 1);
     log_main!("startup", "All models loaded", count = model_count);
 
     // Parse allowed directories
@@ -143,6 +155,7 @@ async fn main() -> std::io::Result<()> {
         landmark_detector,
         allowed_dirs,
         cli.tmp_dir,
+        occluder,
     ));
 
     let bind_address = format!("{}:{}", cli.host, cli.port);

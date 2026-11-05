@@ -50,18 +50,20 @@ const LANDMARKS_512: [[f32; 2]; 5] = [
 /// # Arguments
 /// * `img` - Source image as Array3<u8> (H, W, 3)
 /// * `face` - Detected face with landmarks
-/// * `target_size` - Target size (112, 128, or 512)
+/// * `target_size` - Target size (112, 128, 256, or 512)
 ///
 /// # Returns
 /// AlignedFace containing face data, aligned image, and transformation matrix
 pub fn align_face(img: &Array3<u8>, face: &DetectedFace, target_size: u32) -> Result<AlignedFace> {
+    let landmarks_256 = LANDMARKS_128.map(|[x, y]| [x * 2.0, y * 2.0]);
     let target_landmarks = match target_size {
         112 => &LANDMARKS_112,
         128 => &LANDMARKS_128,
+        256 => &landmarks_256,
         512 => &LANDMARKS_512,
         _ => {
             return Err(FaceSwapError::InvalidInput(format!(
-                "Unsupported target size: {}. Use 112, 128, or 512",
+                "Unsupported target size: {}. Use 112, 128, 256, or 512",
                 target_size
             )))
         }
@@ -159,53 +161,18 @@ pub fn paste_back_inplace(
         (swapped_face[[0, c, y, x]] * 255.0).clamp(0.0, 255.0) as u8
     });
 
-    // Compute face ROI by inverse-transforming aligned face corners to target image space
-    let inv = invert_affine_transform(align_transform)?;
-    let corners: [(f32, f32); 4] = [
-        (0.0, 0.0),
-        (face_size as f32, 0.0),
-        (0.0, face_size as f32),
-        (face_size as f32, face_size as f32),
-    ];
-
-    let mut roi_min_x = f32::MAX;
-    let mut roi_min_y = f32::MAX;
-    let mut roi_max_x = f32::MIN;
-    let mut roi_max_y = f32::MIN;
-    for &(cx, cy) in &corners {
-        let tx = inv[[0, 0]] * cx + inv[[0, 1]] * cy + inv[[0, 2]];
-        let ty = inv[[1, 0]] * cx + inv[[1, 1]] * cy + inv[[1, 2]];
-        roi_min_x = roi_min_x.min(tx);
-        roi_min_y = roi_min_y.min(ty);
-        roi_max_x = roi_max_x.max(tx);
-        roi_max_y = roi_max_y.max(ty);
+    let region = face_region(align_transform, face_size, w, h)?;
+    let FaceRegion {
+        x: roi_x0,
+        y: roi_y0,
+        width: roi_w,
+        height: roi_h,
+        erosion_k,
+        blur_k,
+    } = region;
+    if roi_w == 0 || roi_h == 0 {
+        return Ok(());
     }
-
-    // Compute mask_size for erosion/blur kernel sizing
-    let face_roi_w = (roi_max_x - roi_min_x).max(0.0) as usize;
-    let face_roi_h = (roi_max_y - roi_min_y).max(0.0) as usize;
-    let mask_size = ((face_roi_w * face_roi_h) as f32).sqrt() as usize;
-
-    // Erosion kernel size (same formula as original paste_back)
-    let erosion_k = (mask_size / 10).max(10);
-    let erosion_k = if erosion_k % 2 == 0 {
-        erosion_k + 1
-    } else {
-        erosion_k
-    };
-
-    // Blur kernel size (same formula as original paste_back)
-    let blur_half = (mask_size / 20).max(5);
-    let blur_k = 2 * blur_half + 1;
-
-    // Add padding for erosion + blur kernels so edge effects don't reach the face
-    let padding = (erosion_k / 2 + blur_k / 2 + 2) as f32;
-    let roi_x0 = (roi_min_x - padding).max(0.0) as usize;
-    let roi_y0 = (roi_min_y - padding).max(0.0) as usize;
-    let roi_x1 = ((roi_max_x + padding).ceil() as usize + 1).min(w);
-    let roi_y1 = ((roi_max_y + padding).ceil() as usize + 1).min(h);
-    let roi_w = roi_x1 - roi_x0;
-    let roi_h = roi_y1 - roi_y0;
 
     // Extract transform coefficients (original -> aligned mapping)
     let a = align_transform[[0, 0]];
@@ -279,4 +246,79 @@ pub fn paste_back_inplace(
     }
 
     Ok(())
+}
+
+/// Bounds and blending kernels shared by paste-back and foreground restoration.
+pub struct FaceRegion {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+    pub erosion_k: usize,
+    pub blur_k: usize,
+}
+
+/// Compute frame-space bounds and blending kernels from a frame-to-aligned-face transform.
+pub fn face_region(
+    align_transform: &Array2<f32>,
+    face_size: u32,
+    w: usize,
+    h: usize,
+) -> Result<FaceRegion> {
+    // Compute face ROI by inverse-transforming aligned face corners to target image space
+    let inv = invert_affine_transform(align_transform)?;
+    let corners: [(f32, f32); 4] = [
+        (0.0, 0.0),
+        (face_size as f32, 0.0),
+        (0.0, face_size as f32),
+        (face_size as f32, face_size as f32),
+    ];
+
+    let mut roi_min_x = f32::MAX;
+    let mut roi_min_y = f32::MAX;
+    let mut roi_max_x = f32::MIN;
+    let mut roi_max_y = f32::MIN;
+    for &(cx, cy) in &corners {
+        let tx = inv[[0, 0]] * cx + inv[[0, 1]] * cy + inv[[0, 2]];
+        let ty = inv[[1, 0]] * cx + inv[[1, 1]] * cy + inv[[1, 2]];
+        roi_min_x = roi_min_x.min(tx);
+        roi_min_y = roi_min_y.min(ty);
+        roi_max_x = roi_max_x.max(tx);
+        roi_max_y = roi_max_y.max(ty);
+    }
+
+    // Compute mask_size for erosion/blur kernel sizing
+    let face_roi_w = (roi_max_x - roi_min_x).max(0.0) as usize;
+    let face_roi_h = (roi_max_y - roi_min_y).max(0.0) as usize;
+    let mask_size = ((face_roi_w * face_roi_h) as f32).sqrt() as usize;
+
+    // Erosion kernel size (same formula as original paste_back)
+    let erosion_k = (mask_size / 10).max(10);
+    let erosion_k = if erosion_k % 2 == 0 {
+        erosion_k + 1
+    } else {
+        erosion_k
+    };
+
+    // Blur kernel size (same formula as original paste_back)
+    let blur_half = (mask_size / 20).max(5);
+    let blur_k = 2 * blur_half + 1;
+
+    // Add padding for erosion + blur kernels so edge effects don't reach the face
+    let padding = (erosion_k / 2 + blur_k / 2 + 2) as f32;
+    let roi_x0 = (roi_min_x - padding).max(0.0).min(w as f32) as usize;
+    let roi_y0 = (roi_min_y - padding).max(0.0).min(h as f32) as usize;
+    let roi_x1 = ((roi_max_x + padding).ceil() as usize + 1).min(w);
+    let roi_y1 = ((roi_max_y + padding).ceil() as usize + 1).min(h);
+    let roi_w = roi_x1 - roi_x0;
+    let roi_h = roi_y1 - roi_y0;
+
+    Ok(FaceRegion {
+        x: roi_x0,
+        y: roi_y0,
+        width: roi_w,
+        height: roi_h,
+        erosion_k,
+        blur_k,
+    })
 }

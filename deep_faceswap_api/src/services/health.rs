@@ -1,6 +1,7 @@
 //! GET /api/health
 
-use actix_web::HttpResponse;
+use crate::state::AppState;
+use actix_web::{web, HttpResponse};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -11,6 +12,8 @@ pub struct HealthResponse {
     pub status: String,
     #[schema(example = true)]
     pub cuda: bool,
+    #[schema(example = true)]
+    pub foreground_available: bool,
 }
 
 /// Health check and model status
@@ -22,9 +25,10 @@ pub struct HealthResponse {
         (status = 200, description = "Service is healthy", body = HealthResponse)
     )
 )]
-pub async fn health() -> HttpResponse {
+pub async fn health(state: web::Data<AppState>) -> HttpResponse {
     HttpResponse::Ok().json(HealthResponse {
         status: "ok".to_string(),
         cuda: cfg!(feature = "cuda"),
+        foreground_available: state.models.occluder.is_some(),
     })
 }

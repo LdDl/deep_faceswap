@@ -29,7 +29,7 @@ use ort::{
 use std::path::Path;
 
 #[cfg(feature = "cuda")]
-use ort::execution_providers::CUDAExecutionProvider;
+use ort::execution_providers::{cuda::ConvAlgorithmSearch, CUDAExecutionProvider};
 
 const SWAP_SIZE: usize = 128;
 
@@ -101,7 +101,10 @@ impl FaceSwapper {
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_log_level(ort_log_level)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
-            .with_execution_providers([CUDAExecutionProvider::default().build()])
+            .with_execution_providers([CUDAExecutionProvider::default()
+                .with_tf32(true)
+                .with_conv_algorithm_search(ConvAlgorithmSearch::Heuristic)
+                .build()])
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| FaceSwapError::Ort(format!("{}", e)))?

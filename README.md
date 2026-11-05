@@ -3,25 +3,48 @@
 Rust implementation of face swapping. Basically a port of [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam)
 
 ## Table of contents
+- [Showcase](#showcase)
 - [Work in progress](#work-in-progress)
 - [Quick start](#quick-start)
 - [CLI usage](#cli-usage)
-- [Showcase](#showcase)
 - [Web UI and REST API](#web-ui-and-rest-api)
 - [CUDA support](#cuda-support)
 - [Project structure](#project-structure)
 - [License](#license)
+
+### Showcase
+
+**Image swap (one to one)**
+
+https://github.com/user-attachments/assets/09568c8e-ab18-4c1a-9163-492692338619
+
+**Image swap (one to many)**
+
+https://github.com/user-attachments/assets/4fa7a32a-6d4f-409a-b60c-82817262b286
+
+**Image swap (many to many)**
+
+https://github.com/user-attachments/assets/82d1d32b-e6bb-4456-ae7b-d88389870831
+
+**Video swap (many to many)**
+
+https://github.com/user-attachments/assets/f9492d17-eee8-47f5-84db-78ccdc57fbe9
+
+> Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
+
+> Showcase could be obsolete a bit (e.g. it does not show preservation of objects covering face), but it gives a good idea of what the project is capable of.
 
 ## Work in progress
 
 Current:
 - Face swap for images (single source + single target)
 - Face swap for video (single source + target video, frame-by-frame)
-- Face detection using YOLOv8n from buffalo_l package
+- Face detection using SCRFD from buffalo_l package
 - Face recognition using ArcFace w600k_r50
 - Face swapping using inswapper_128
 - Face enhancement using GFPGAN (optional)
 - Mouth mask to preserve target's mouth expression (optional)
+- Foreground preservation using XSeg to keep objects covering the target face (optional)
 - Multi-face support with interactive mapping (images and video)
 - CUDA acceleration support via ONNX Runtime
 - ROI-based paste_back for high-resolution images (~50-100x faster on 4K, ~3.7x end-to-end on 720p video)
@@ -47,7 +70,7 @@ cd scripts
 ```
 
 This will download:
-- `buffalo_l/det_10g.onnx` - Face detector (YOLOv8n)
+- `buffalo_l/det_10g.onnx` - Face detector (SCRFD)
 - `buffalo_l/w600k_r50.onnx` - Face recognizer (ArcFace ResNet50)
 - `buffalo_l/2d106det.onnx` - 106-point facial landmark detector (for mouth mask feature). Note that even if you don't plan to use mouth mask feature, it will be downloaded still because it's not a big file and I simply don't want to maintain separate script for it currently.
 - `inswapper_128.onnx` - Face swapper
@@ -85,6 +108,16 @@ This will create:
 Note 1: I've used Python 3.14.2. If you have a different version, it may work, but I haven't tested it.
 
 Note 2: The conversion process will install PyTorch CPU-only version, which is around 200MB. This is a one-time operation, and after conversion, you can remove the virtual environment if you want. GPU version of PyTorch is not required for conversion.
+
+#### Optional: Foreground preservation model
+
+Download XSeg for preserving objects covering the target face:
+
+```bash
+./scripts/download_xseg.sh
+```
+
+This downloads `models/xseg_3.onnx` from [FaceFusion](https://github.com/facefusion/facefusion-assets/releases/tag/models-3.2.0). Its [model metadata](https://github.com/facefusion/facefusion/blob/master/facefusion/face_masker.py) lists the license as GPL-3.0.
 
 ### 2. Build
 
@@ -168,6 +201,22 @@ deep-faceswap-cli swap \
   --enhance
 ```
 
+### With foreground preservation
+
+Add `--preserve-foreground` to keep hands, food and other objects and other things covering the target face:
+
+```bash
+deep-faceswap-cli swap \
+  --source source.jpg \
+  --target target.jpg \
+  --output output.jpg \
+  --preserve-foreground
+```
+
+This uses `models/xseg_3.onnx`. Protected pixels are restored after swapping, mouth masking and enhancement. `--foreground-margin` expands the protected area (default: 2); `--foreground-blur` softens its boundary (default: 3). Both accept values from 0 to 16, measured in the aligned 256x256 face mask.
+
+Masks are estimated independently per frame. Thin objects and motion blur may be missed; temporal stabilization and manual mask correction are not included. Lossy output encoding can still change the restored pixels.
+
 ### Multi-face support
 
 Add `--multi-face` flag to swap multiple faces with interactive mapping:
@@ -209,7 +258,7 @@ Face crops are saved to `./tmp/face_crops/{source,target}/` for visual inspectio
 
 Without `--multi-face` flag, only the highest-score face from each image is used (backward compatible behavior).
 
-Multi-face mode works with `--enhance` and `--mouth-mask` flags - all swapped faces will be enhanced/masked accordingly.
+Multi-face mode works with `--enhance`, `--mouth-mask` and `--preserve-foreground` flags - all swapped faces will be enhanced/masked accordingly.
 
 ### Video processing
 
@@ -228,9 +277,9 @@ The video pipeline:
 3. Processes each frame: detects face, matches to cluster, swaps
 4. Re-encodes the result with the original audio track
 
-All image flags work with video too (`--enhance`, `--mouth-mask`, `--multi-face`).
+All image flags work with video too (`--enhance`, `--mouth-mask`, `--preserve-foreground`, `--foreground-margin`, `--foreground-blur`, `--multi-face`).
 
-Without `--multi-face`, only one face is swapped per frame (the one closest to the source embedding). If the video contains multiple people and you want to swap more than one face, use `--multi-face`; then the tool will scan the video, cluster all detected faces, show you representative crops, and ask which source should map to which cluster.
+Without `--multi-face`, only one face is swapped per frame (the one closest to the reference embedding of the first detected target face). If the video contains multiple people and you want to swap more than one face, use `--multi-face`; then the tool will scan the video, cluster all detected faces, show you representative crops, and ask which source should map to which cluster.
 
 You can specify a custom temporary directory for extracted frames:
 
@@ -255,7 +304,9 @@ deep-faceswap-cli swap \
   --enhance \
   --enhancer models/GFPGANv1.4.onnx \
   --mouth-mask \
-  --landmark-model models/buffalo_l/2d106det.onnx
+  --landmark-model models/buffalo_l/2d106det.onnx \
+  --preserve-foreground \
+  --occluder-model models/xseg_3.onnx
 ```
 
 ### Requirements
@@ -273,26 +324,6 @@ deep-faceswap-cli swap \
 ## Web UI and REST API
 
 The project includes a web-based interface built with SvelteKit + Tailwind CSS, served by an actix-web REST API server. It provides the same capabilities as the CLI but with a visual interface for face mapping and progress tracking.
-
-### Showcase
-
-**Image swap (one to one)**
-
-https://github.com/user-attachments/assets/09568c8e-ab18-4c1a-9163-492692338619
-
-**Image swap (one to many)**
-
-https://github.com/user-attachments/assets/4fa7a32a-6d4f-409a-b60c-82817262b286
-
-**Image swap (many to many)**
-
-https://github.com/user-attachments/assets/82d1d32b-e6bb-4456-ae7b-d88389870831
-
-**Video swap (many to many)**
-
-https://github.com/user-attachments/assets/f9492d17-eee8-47f5-84db-78ccdc57fbe9
-
-> Multi-face mapping, async processing with progress, result preview. The processing stage is sped up ~100x in this recording, actual processing time depends on video length and hardware.
 
 ### Build
 
@@ -327,14 +358,15 @@ make CUDA=0
   --recognizer models/buffalo_l/w600k_r50.onnx \
   --swapper models/inswapper_128.onnx \
   --enhancer models/GFPGANv1.4.onnx \
-  --landmark-model models/buffalo_l/2d106det.onnx
+  --landmark-model models/buffalo_l/2d106det.onnx \
+  --occluder-model models/xseg_3.onnx
 ```
 
 Then open `http://localhost:36000` in your browser.
 
-The `--enhancer` and `--landmark-model` flags are optional. Without them, the enhance and mouth mask features will not be available in the UI.
+The `--enhancer`, `--landmark-model` and `--occluder-model` flags are optional. They load the models for enhancement, mouth masking and foreground preservation. Enable "Preserve foreground objects" in the UI to protect objects; "Foreground settings" exposes "Protection margin" and "Edge softness".
 
-There is also a `make run` shortcut that builds everything and starts the server with default model paths.
+There is also a `make run` shortcut that builds everything and starts the server with default model paths, including GFPGAN, the landmark model and XSeg. These models must be present.
 
 ### API server options
 
@@ -349,12 +381,15 @@ There is also a `make run` shortcut that builds everything and starts the server
 | `--swapper` | `models/inswapper_128.onnx` | Face swapper model |
 | `--enhancer` | (none) | GFPGAN enhancement model |
 | `--landmark-model` | (none) | 106-point landmark model for mouth mask |
+| `--occluder-model` | (none) | XSeg model for foreground preservation |
 | `--allowed-dir` | (all) | Comma-separated directories the file browser can access |
 | `-v, --verbose` | `1` | Verbose level: 0 (errors), 1 (main), 2 (details), 3 (all) |
 
 ### API documentation
 
 When the server is running, interactive API docs are available at `http://localhost:36000/api/docs`.
+
+Image and video swap requests accept `preserve_foreground` (default: false) and `foreground_options`, for example `"foreground_options": {"margin": 2, "blur": 3}`. `/api/health` reports `foreground_available`. Enabling preservation without a loaded XSeg model is rejected before processing.
 
 ## CUDA support
 
@@ -370,7 +405,7 @@ To use CUDA acceleration:
    cargo build --release --features cuda
    ```
 
-When built with the cuda feature, the tool will use CUDA for inference. If CUDA is not available at runtime, it will fall back to CPU.
+When built with the cuda feature, the tool will use CUDA for inference.
 
 ## Project structure
 

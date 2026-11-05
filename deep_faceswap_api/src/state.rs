@@ -4,6 +4,7 @@ use crate::jobs::JobState;
 use deep_faceswap_core::detection::FaceDetector;
 use deep_faceswap_core::enhancer::FaceEnhancer;
 use deep_faceswap_core::landmark::LandmarkDetector;
+use deep_faceswap_core::occlusion::FaceOccluder;
 use deep_faceswap_core::recognition::FaceRecognizer;
 use deep_faceswap_core::swapper::FaceSwapper;
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ pub struct ModelRegistry {
     pub swapper: Mutex<FaceSwapper>,
     pub enhancer: Mutex<Option<FaceEnhancer>>,
     pub landmark_detector: Mutex<Option<LandmarkDetector>>,
+    pub occluder: Option<Mutex<FaceOccluder>>,
 }
 
 /// Shared application state passed to all route handlers
@@ -37,6 +39,7 @@ impl AppState {
         landmark_detector: Option<LandmarkDetector>,
         allowed_dirs: Vec<String>,
         tmp_dir: String,
+        occluder: Option<FaceOccluder>,
     ) -> Self {
         Self {
             models: ModelRegistry {
@@ -45,6 +48,7 @@ impl AppState {
                 swapper: Mutex::new(swapper),
                 enhancer: Mutex::new(enhancer),
                 landmark_detector: Mutex::new(landmark_detector),
+                occluder: occluder.map(Mutex::new),
             },
             jobs: Mutex::new(HashMap::new()),
             allowed_dirs,

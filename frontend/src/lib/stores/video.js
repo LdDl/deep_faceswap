@@ -1,3 +1,4 @@
+import { ForegroundOptions } from '../foreground_options.js'
 import { request } from '../api.js'
 import { ClusterMapping } from '../cluster_mapping.js'
 import { FaceInfo } from '../face_info.js'
@@ -80,9 +81,11 @@ export const parseAnalyzeResult = (data) => {
  * @param {boolean} enhance
  * @param {boolean} mouthMask
  * @param {string} [tmpDir]
+ * @param {boolean} [preserveForeground]
+ * @param {ForegroundOptions} [foregroundOptions]
  * @returns {Promise<VideoSwapResponse>}
  */
-export const swapVideo = async (sessionId, sourcePaths, targetVideoPath, outputPath, clusterMappings, enhance, mouthMask, tmpDir) => {
+export const swapVideo = async (sessionId, sourcePaths, targetVideoPath, outputPath, clusterMappings, enhance, mouthMask, tmpDir, preserveForeground = false, foregroundOptions = new ForegroundOptions()) => {
 	const body = {
 		session_id: sessionId,
 		source_paths: sourcePaths,
@@ -90,7 +93,9 @@ export const swapVideo = async (sessionId, sourcePaths, targetVideoPath, outputP
 		output_path: outputPath,
 		cluster_mappings: clusterMappings,
 		enhance: enhance,
-		mouth_mask: mouthMask
+		mouth_mask: mouthMask,
+		preserve_foreground: preserveForeground,
+		foreground_options: foregroundOptions
 	}
 	if (tmpDir) body.tmp_dir = tmpDir
 	const data = await request('POST', '/swap/video', body)
